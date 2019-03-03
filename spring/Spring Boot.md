@@ -43,7 +43,7 @@ public ContentNegotiatingViewResolver viewResolver(BeanFactory beanFactory) {
 
 上述方法有如下的调用栈和被执行的栈顶源码：
 
-![1551599094923](images/%5CUsers%5CAdministrator%5CAppData%5CRoaming%5CTypora%5Ctypora-user-images%5C1551599094923.png)
+![1551599094923](images/ContentNegotiatingViewResolver.png)
 
 ```java
 @Override
