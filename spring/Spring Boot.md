@@ -243,8 +243,6 @@ public class DelegatingWebMvcConfiguration extends WebMvcConfigurationSupport {
 
 ### 自定义配置 mvc 或者完全覆盖 MVC
 
-到现在一切都很明朗了：
-
 - 如果想要自定义部分的配置，只需要加入相对应的组件，或者写自己的`WebMvcConfigurer`并加入到容器中。可以参考官方文档。
   - If you want to keep Spring Boot MVC features and you want to add additional [MVC configuration](https://docs.spring.io/spring/docs/5.1.5.RELEASE/spring-framework-reference/web.html#mvc) (interceptors, formatters, view controllers, and other features), you can add your own `@Configuration` class of type `WebMvcConfigurer` but **without** `@EnableWebMvc`. If you wish to provide custom instances of `RequestMappingHandlerMapping`, `RequestMappingHandlerAdapter`, or `ExceptionHandlerExceptionResolver`, you can declare a `WebMvcRegistrationsAdapter` instance to provide such components.
 
@@ -253,9 +251,18 @@ public class DelegatingWebMvcConfiguration extends WebMvcConfigurationSupport {
 - 如果需要完全接管 mvc 配置，参考官方文档。
   - If you want to take complete control of Spring MVC, you can add your own `@Configuration` annotated with `@EnableWebMvc`.
 
+为什么自定义的 `@EnableWebMvc`加上`@Configuration`可以完全接管 MVC？看一下源码就很明白了
 
+```
+@Configuration
+@ConditionalOnWebApplication(type = Type.SERVLET)
+@ConditionalOnClass({ Servlet.class, DispatcherServlet.class, WebMvcConfigurer.class })
+@ConditionalOnMissingBean(WebMvcConfigurationSupport.class)
+public class WebMvcAutoConfiguration {
+}
+```
 
-
+`@ConditionalOnMissingBean(WebMvcConfigurationSupport.class)`是在`BeanDefinition`注册之后，所有单例Bean实例化之前进行判断的。
 
 
 
