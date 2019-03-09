@@ -1,6 +1,6 @@
 # Spring Boot 笔记
 
-## Mvc 与 Spring Boot 自动配置
+## Spring Boot 自动配置 与 Mvc
 
 ### `WebMvcAutoConfiguration`做了些什么
 
@@ -266,5 +266,17 @@ public class WebMvcAutoConfiguration {
 
 
 
+## Spring Boot 集成 Freemarker
 
+首先在配置文件中加入 
+
+spring.freemarker.request-context-attribute=request
+
+然后在模板文件中可以这样使用
+
+var url='${request.contextPath}/public/wxmember/save';
+
+
+
+## Spring Boot 错误处理机制
 
