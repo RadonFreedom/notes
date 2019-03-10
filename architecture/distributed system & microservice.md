@@ -299,29 +299,35 @@ XML，SOAP和web服务有他们各自的用途，但是就像其他东西一样�
 
 ## 什么是微服务架构？
 
-> n short, the microservice architectural style is an approach to developing a single application as a **suite of small services**, each **running in its own process** and communicating with lightweight mechanisms, often an HTTP resource API. These services are **built around business capabilities** and **independently deployable** by fully automated deployment machinery. There is a **bare minimum of centralized management** of these services, which may be written in different programming languages and use different data storage technologies.
+> In short, the microservice architectural style is an approach to developing a single application as a **suite of small services**, each **running in its own process** and communicating with lightweight mechanisms, often an HTTP resource API. These services are **built around business capabilities** and **independently deployable** by fully automated deployment machinery. There is a **bare minimum of centralized management** of these services, which may be written in different programming languages and use different data storage technologies.
 
-[请看博文](https://martinfowler.com/microservices/)。
+[请看博文](https://martinfowler.com/articles/microservices.html)。
+
+再自己总结几点：
+
+- 原子化的服务：每种服务独立提供一种服务，划分的粒度更细，和其他的服务最小依赖，有自己的数据库。
+- 集群下的每种服务使用相同的数据库。
+- 服务之间交流用RESTful风格：HTTP+JSON进行数据交换，这也是能摆脱RPC和能专注在DevOps的原因。
 
 ## 微服务架构和SOA架构的区别
 
 | **SERVICE-ORIENTED ARCHITECTURE**                            | **MICROSERVICES ARCHITECTURE**                               |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Maximizes application service reusability                    | Focused on decoupling                                        |
-| 系统的变化需要修改整体结构（修改ESB）                        | A systematic change is to create a new service               |
-| DevOps and Continuous Delivery are becoming popular, but are not mainstream | Strong focus on DevOps and Continuous Delivery               |
+| Maximizes application service reusability                    | Focused on **decoupling**                                    |
+| 系统的变化需要修改整体结构（修改ESB）                        | A systematic change is to **create a new service**           |
+| DevOps and Continuous Delivery are becoming popular, but are not mainstream | Strong focus on **DevOps and Continuous Delivery**（因为使用RESTful通讯，不担心语言问题） |
 | Focused on business functionality reuse                      | More importance on the concept of “bounded context”          |
 | For communication it uses Enterprise Service Bus (ESB)       | For communication uses less elaborate and simple messaging systems |
 | Supports multiple message protocols                          | Uses lightweight protocols such as HTTP, REST or Thrift APIs |
-| Use of a common platform for all services deployed to it     | Application Servers are not really used, it’s common to use cloud platforms |
+| Use of a common platform for all services deployed to it     | Application Servers are not really used, it’s common to use cloud platforms（还是要归功于RESTful） |
 | Use of containers (such as Docker) is less popular           | Containers work very well with microservices                 |
 | SOA services share the data storage                          | Each microservice can have an independent data storage       |
-| Common governance and standards                              | Relaxed governance, with greater focus on teams collaboration and freedom of choice |
+| Common governance and standards                              | Relaxed governance, with greater focus on teams collaboration and freedom of choice（DevOps） |
 
 I’ll get into more detail in some of the aspects shown in the table above and further explain the differences:
 
 - **Development** – In both architectures, services can be developed in different programming languages and tools, which brings technology diversity into the development team. The development can be organized within multiple teams, however, in SOA, each team needs to know about the common communication mechanism. On the other hand, with microservices, the services can operate and be deployed independently of other services. So, it is easier to deploy new versions of microservices frequently or scale a service independently. 
-- **“Bounded Context”** - SOA encourages sharing of components, whereas microservices try to minimize on sharing through “bounded context.” A bounded context refers to the coupling of a component and its data as a single unit with minimal dependencies. As SOA relies on multiple services to fulfill a business request, systems built on SOA are likely to be slower than microservices.
+- **“Bounded Context”** - **SOA encourages sharing of components, whereas microservices try to minimize on sharing through “bounded context.”** A bounded context refers to the coupling of a component and its data as a single unit with minimal dependencies. **As SOA relies on multiple services to fulfill a business request, systems built on SOA are likely to be slower than microservices.**
 - **Communication** - In SOA, the ESB could become a single point of failure which impacts the entire system. Since every service is communicating through the ESB, if one of the services slows down, it could clog up the ESB with requests for that service. On the other hand, microservices are much better in error tolerance. For example, if one microservice has a memory fault, then only that microservice will be affected. All the other microservices will continue to handle requests regularly.
 - **Interoperability -** SOA promotes the use of multiple heterogeneous protocols through its messaging middleware component. Microservices attempt to simplify the architecture pattern by reducing the number of choices for integration. So, if you want to integrate several systems using different protocols in a heterogeneous environment, you need to consider SOA. If all your services could be accessed through the same remote access protocol, then microservices are a better option for you.
 - **Size** - Last but not least, the main difference between SOA and microservices lies in the size and scope. The prefix “micro” in microservices refers to the granularity of the internal components, meaning they have to be significantly smaller than what SOA tends to be. Service components within microservices generally have a single purpose and they do that one thing really well. On the other hand, in SOA services usually include much more business functionality, and they are often implemented as complete subsystems.
@@ -334,7 +340,7 @@ PiggyMetrics was decomposed into three core microservices. All of them are indep
 
 ![img](images\distributed system & microservice\730f2922-ee20-11e5-8df0-e7b51c668847.png)
 
-
+![Infrastructure services](images\distributed system & microservice\365c0d94-eefa-11e5-90ad-9d74804ca412.png)
 
 
 
