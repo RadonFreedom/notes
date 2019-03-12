@@ -89,14 +89,6 @@ B+树索引将在超大数据量下失去作用，因为：
 
 - 把热点数据（最近的数据）分区存储，并保存在内存中以减少IO：
 
-### 
-
-
-
-
-
-
-
 
 
 ## Q&A
@@ -121,9 +113,9 @@ show variables like 'character%';
 show variables like 'collation%';
 ```
 
-![1552356921773](images\mysql\1552356921773.png)
+![1552356921773](images/mysql/1552356921773.png)
 
-![1552356958259](images\mysql\1552356958259.png)
+![1552356958259](images/mysql/1552356958259.png)
 
 #### 实验验证：
 
@@ -165,7 +157,7 @@ select name from account where name like 'radon';
 select name FROM account WHERE name REGEXP 'radon';
 ```
 
-![1552357215474](images\mysql\1552357215474.png)
+![1552357215474](images/mysql/1552357215474.png)
 
 ```MYSQL
 # 修改列定义，改为数据库级别的默认字符集和默认校对
@@ -189,7 +181,7 @@ select name from account where name like 'radon';
 select name FROM account WHERE name REGEXP 'radon';
 ```
 
-![1552357499130](images\mysql\1552357499130.png)
+![1552357499130](images/mysql/1552357499130.png)
 
 
 
