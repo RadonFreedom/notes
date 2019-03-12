@@ -18,7 +18,7 @@
 
 　　下面这种来自[Distributed systems for fun and profit  ](http://book.mixu.net/distsys/)的图形象生动说明了Partition与Replication是如何协作的。 
 
-　　![img](images\distributed system\1089769-20171108093209200-1813701105.png)
+　　![img](images/distributed system/1089769-20171108093209200-1813701105.png)
 
 　　**Partition和Replication是解决分布式系统问题的一记组合拳**，很多具体的问题都可以用这个思路去解决。但**这并不是银弹，往往是为了解决一个问题，会引入更多的问题**，比如为了可用性与可靠性保证，引用了冗余（复制集）。有了冗余，各个副本间的一致性问题就变得很头疼，一致性在系统的角度和用户的角度又有不同的等级划分。如果要保证强一致性，那么会影响可用性与性能，在一些应用（比如电商、搜索）是难以接受的。如果是最终一致性，那么就需要处理数据冲突的情况。CAP、FLP这些理论告诉我们，**在分布式系统中，没有最佳的选择，都是需要权衡，做出最合适的选择。**
 
@@ -113,7 +113,7 @@
 
 ### 一、分布式系统的三个指标
 
-![img](images\distributed system\bg2018071607.jpg)
+![img](images/distributed system/bg2018071607.jpg)
 
 1998年，加州大学的计算机科学家 Eric Brewer 提出，分布式系统有三个指标。
 
@@ -131,7 +131,7 @@ Eric Brewer 说，这三个指标不可能同时做到。这个结论就叫做 C
 
 大多数分布式系统都分布在多个子网络。每个子网络就叫做一个区（partition）。**分区容错的意思是，区间通信可能失败**。比如，一台服务器放在中国，另一台服务器放在美国，这就是两个区，它们之间可能无法通信。
 
-![img](images\distributed system\bg2018071601.png)
+![img](images/distributed system/bg2018071601.png)
 
 上图中，G1 和 G2 是两台跨区的服务器。G1 向 G2 发送一条消息，G2 可能无法收到。系统设计的时候，必须考虑到这种情况。
 
@@ -141,23 +141,23 @@ Eric Brewer 说，这三个指标不可能同时做到。这个结论就叫做 C
 
 Consistency 中文叫做"一致性"。意思是，写操作之后的读操作，必须返回该值。举例来说，某条记录是 v0，用户向 G1 发起一个写操作，将其改为 v1。
 
-![img](images\distributed system\bg2018071602.png)
+![img](images/distributed system/bg2018071602.png)
 
 接下来，用户的读操作就会得到 v1。这就叫一致性。
 
-![img](images\distributed system\bg2018071603.png)
+![img](images/distributed system/bg2018071603.png)
 
 问题是，用户有可能向 G2 发起读操作，由于 G2 的值没有发生变化，因此返回的是 v0。G1 和 G2 读操作的结果不一致，这就不满足一致性了。
 
-![img](images\distributed system\bg2018071604.png)
+![img](images/distributed system/bg2018071604.png)
 
 **为了保持一致性，让 G2 也能变为 v1，就要在 G1 写操作的时候，让 G1 向 G2 发送一条消息，要求 G2 也改成 v1。**
 
-![img](images\distributed system\bg2018071605.png)
+![img](images/distributed system/bg2018071605.png)
 
 这样的话，用户向 G2 发起读操作，也能得到 v1。
 
-![img](images\distributed system\bg2018071606.png)
+![img](images/distributed system/bg2018071606.png)
 
 ### 四、Availability
 
@@ -220,7 +220,7 @@ then there’s a very good chance it could and should be exposed as a service to
 
 **The job of ESB is to expose and invoke services of the integrated systems.** That way, in most cases, only one access method, one interface, needs to be defined between each system and the ESB.
 
-![img](images\distributed system & microservice\esb-ok-abg4.png)
+![img](images/distributed system & microservice/esb-ok-abg4.png)
 
 So if, like in the diagram above, you have 8 systems, there will be 16 interfaces (one in each direction) to create, maintain, manage and take care of.
 
@@ -242,7 +242,7 @@ This fact alone should make you strongly consider introducing an ESB.
 
 2. **分布式系统的SOA架构**：随着系统的子项目越来越多，项目开始变得非常复杂，**我们不得不进一步对系统的性能进行提升，我们将多个模块拆分为多个服务，UI层直接通过AJAX（json数据体）或者SOAP（XML数据体）请求所需服务，多个服务之间通过RPC互相调用**。
 
-![img](images\distributed system & microservice\880309-20170514200850847-888073421.png)
+![img](images/distributed system & microservice/880309-20170514200850847-888073421.png)
 
 
 
@@ -281,7 +281,7 @@ XML，SOAP和web服务有他们各自的用途，但是就像其他东西一样�
 
 [xmall](https://github.com/Exrick/xmall)这个项目是很典型的SOA架构。
 
-![img](images\distributed system & microservice\68747470733a2f2f692e6c6f6c692e6e65742f323031382f30372f32322f356235343631393236393639622e706e67.png)
+![img](images/distributed system & microservice/68747470733a2f2f692e6c6f6c692e6e65742f323031382f30372f32322f356235343631393236393639622e706e67.png)
 
 - **展示层调用后端提供的服务**：当使用展示层的电商UI进行一个下订单的任务时，展示层通过数据总线（AJAX（json数据体）或者SOAP（XML数据体）），分别调用对应的服务即可。
 
@@ -338,9 +338,9 @@ I’ll get into more detail in some of the aspects shown in the table above and 
 
 PiggyMetrics was decomposed into three core microservices. All of them are independently deployable applications, organized around certain business domains.
 
-![img](images\distributed system & microservice\730f2922-ee20-11e5-8df0-e7b51c668847.png)
+![img](images/distributed system & microservice/730f2922-ee20-11e5-8df0-e7b51c668847.png)
 
-![Infrastructure services](images\distributed system & microservice\365c0d94-eefa-11e5-90ad-9d74804ca412.png)
+![Infrastructure services](images/distributed system & microservice/365c0d94-eefa-11e5-90ad-9d74804ca412.png)
 
 
 
