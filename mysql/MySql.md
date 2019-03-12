@@ -89,3 +89,151 @@ B+树索引将在超大数据量下失去作用，因为：
 
 - 把热点数据（最近的数据）分区存储，并保存在内存中以减少IO：
 
+### 
+
+
+
+
+
+
+
+
+
+## Q&A
+
+### like regexp 匹配时不区分大小写？
+
+#### 首先厘清概念：
+
+ 字符集（`charset` 或 `char set`关键字）为字母和符号的集合；
+ 编码为某个字符集成员的内部表示；
+ 校对为规定字符如何比较的指令。
+
+因此，**查询是否区分大小写与创建表时设定的被查询列的字符集的校对（`Collation`）有关。**
+
+可以查询各等级的默认字符集和校对
+
+```SQL
+# 各种不同级别的默认字符集
+show variables like 'character%';
+
+# 各种不同级别的默认校对
+show variables like 'collation%';
+```
+
+![1552356921773](images\mysql\1552356921773.png)
+
+![1552356958259](images\mysql\1552356958259.png)
+
+#### 实验验证：
+
+按照下面创建表`account`：
+
+```sql
+create table account
+(
+  id int not null auto_increment,
+  name varchar(50) binary not null,
+  primary key (id)
+);
+```
+
+在`name`列加上`binary`关键字约束后会直接改变这一列的字符集校对`COLLATION`。
+
+观察结果就可以发现，虽然`name`列的字符集和默认字符集相同，但是`COLLATION`改变了：`utf8mb4_bin`是区分大小写的校对。
+
+```SQL
+> show create table account;
+
+account	"CREATE TABLE `account` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci"
+```
+
+下面插入数据并进行测试：
+
+```MYSQL
+insert into account (name)
+values ('radon');
+insert into account (name)
+values ('Radon');
+
+# 查询结果区分大小写
+select name from account where name like 'radon';
+select name FROM account WHERE name REGEXP 'radon';
+```
+
+![1552357215474](images\mysql\1552357215474.png)
+
+```MYSQL
+# 修改列定义，改为数据库级别的默认字符集和默认校对
+alter table account modify name varchar(50) not null ;
+
+# 查询建表，发现已经改为默认字符集和默认校对
+show create table account;
+
+CREATE TABLE `account` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(50) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+```
+
+再次进行查询：
+
+```MYSQL
+# 查询结果不区分大小写
+select name from account where name like 'radon';
+select name FROM account WHERE name REGEXP 'radon';
+```
+
+![1552357499130](images\mysql\1552357499130.png)
+
+
+
+### 表名和数据库名是否大小写敏感?
+
+和下面两个全局变量有关
+
+```MYSQL
+show global variables like '%lower_case%';
+
++------------------------+-------+
+| Variable_name          | Value |
++------------------------+-------+
+| lower_case_file_system | ON    |
+| lower_case_table_names | 1     |
++------------------------+-------+
+```
+
+#### lower_case_file_system
+
+表示当前系统文件是否大小写敏感，**只读参数，无法修改。**
+
+ON  大小写不敏感 
+OFF 大小写敏感 
+
+#### lower_case_table_names
+
+可以修改。
+
+lower_case_table_names = 0时，mysql会直接按照操作系统是否区分大小写来操作。 
+
+lower_case_table_names = 1时，mysql会先把表名转为小写，再按照操作系统是否区分大小写来操作。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

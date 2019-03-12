@@ -1,6 +1,12 @@
-# 一些重要概念
+# 微服务中一些重要概念
 
 ## RPC
+
+## API 网关
+
+> It is a single entry point into the system, used to handle requests by routing them to the appropriate backend service or by invoking multiple backend services and [aggregating the results](http://techblog.netflix.com/2013/01/optimizing-netflix-api.html). Also, it can be used for authentication, insights, stress and canary testing, service migration, static response handling, active traffic management.
+
+[API 网关性能比较：NGINX vs. ZUUL vs. Spring Cloud Gateway vs. Linkerd](https://infoq.cn/article/comparing-api-gateway-performances)
 
 ## 服务自动注册和发现
 
@@ -81,7 +87,22 @@ Spring Cloud由众多子项目组成，如Spring Cloud Config、Spring Cloud Net
 
 
 
+## 注册中心 EUREKA
 
+
+
+## F&Q
+
+### bootstrap.yml application.yml 的区别？
+
+**bootstrap.yml is loaded before application.yml.**
+
+It is typically used for the following:
+
+- when using Spring Cloud Config Server, you should specify `spring.application.name` and `spring.cloud.config.server.git.uri` inside `bootstrap.yml`
+- some `encryption/decryption` information
+
+Technically, `bootstrap.yml` is loaded by a parent Spring `ApplicationContext`. That parent `ApplicationContext` is loaded before the one that uses `application.yml`.
 
 
 
