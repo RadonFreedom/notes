@@ -10,13 +10,104 @@
 
    微服务是基于分布式系统构建的，但是它对于服务的要求更独立更原子，不像SOA更多注重的是代码和功能复用。
 
-
-
 ## JVM
 
-### 运行时内存
+### 概念
 
+#### 内存泄漏 和 内存溢出
 
+- **内存泄露**：指程序中动态分配内存给一些临时对象，但是对象不会被GC所回收，始终占用内存。即**被分配的对象可达但已无用**。
+- **内存溢出**：指程序运行过程中**无法申请到足够的内存**而导致JVM的OOM。
+
+### 实现
+
+#### try catch finally
+
+finally会在return执行之后，返回之前执行。
+
+JVM对他们的实现是，复制每个finally块到每个控制流的最后，保证会执行到。
+
+try catch由方法的异常表执行字节码跳转。
+
+### 运行时内存模型 和 JVM ERROR
+
+需要强调的是**模型与实现的区别**。本节内容只是jvm specification中规定的JAVA虚拟机实现应该遵循的内存模型，如果**需要交代具体实现，必须会特殊说明**。
+
+![概念模型](images\offer\概念模型.png)
+
+#### 线程私有内存
+
+##### 程序计数器PC
+
+程序计数器是一块较小的内存空间，可以看作是当前线程所执行的字节码的行号指示器。**字节码解释器工作时通过改变这个计数器的值来选取下一条需要执行的字节码指令，分支、循环、跳转、异常处理、线程恢复等功能都需要依赖这个计数器来完。**
+
+**为了线程切换后能恢复到正确的执行位置**，每条线程都需要有一个独立的程序计数器，各线程之间计数器互不影响，独立存储，我们称这类内存区域为“线程私有”的内存。
+
+程序计数器是唯一一个不会出现OutOfMemoryError的内存区域，它的生命周期和线程相同。
+
+##### 虚拟机栈
+
+栈帧：和方法调用是一对一的关系。
+
+- 局部变量表：编译器可知的各种数据类型（boolean、byte、char、short、int、float、long、double）、对象引用（reference类型）。
+
+- 操作数栈：
+
+  > Each frame (§2.6) contains a last-in-first-out (LIFO) stack known as its operand stack. The maximum depth of the operand stack of a frame is determined at compile-time and is supplied along with the code for the method associated with the frame (§4.7.3).
+
+**局部变量表和操作数栈的交互即是本栈帧对应方法的字节码的执行。**
+
+**StackOverFlowError：** 若Java虚拟机栈的内存大小不允许动态扩展，那么当线程请求栈的深度超过当前Java虚拟机栈的最大深度的时候，就抛出StackOverFlowError异常。
+
+**OutOfMemoryError：** 若 Java 虚拟机栈的内存大小允许动态扩展，且当线程请求栈时内存用完了，无法再动态扩展了，此时抛出OutOfMemoryError异常。
+
+##### 本地方法栈
+
+同虚拟机栈一样会抛出OOM & SOF。
+
+#### 线程共享内存
+
+##### 堆
+
+存放对象实例。超过最大值会OOM。
+
+##### 方法区
+
+存放对象类型相关的信息。
+
+> It stores per-class structures such as the run-time constant pool, field and method data, and the code for methods and constructors, including the special methods used in class and interface initialization <clinit> and in instance initialization <init>.
+
+超过方法区内存限制将抛出OOM。
+
+**hotspot VM JDK8之后对方法区的实现：Metaspace**
+
+Java 8 彻底将永久代 (PermGen) 移除出了 HotSpot JVM，将其原有的数据迁移至 Java Heap 或 Metaspace。
+
+1. 永久代为什么被移出HotSpot JVM了？
+   在 HotSpot JVM 中，永久代中用于**存放类和方法的元数据以及常量池**，比如Class和Method。每当一个类初次被加载的时候，它的元数据都会放到永久代中。永久代是有大小限制的，如果加载的类太多，经常导致永久代内存溢出 java.lang.OutOfMemoryError: PermGen ， JVM 的开发者希望这一块内存可以更灵活地被管理，不要再经常出现这样的 OOM。
+
+2. Metaspace物理位置
+   JDK 8 开始把类的元数据放到本地堆内存(native heap)中，这一块区域就叫 Metaspace，中文名叫元空间。
+
+3. 优点
+   OOM问题将不复存在，因为默认的类的元数据分配只受物理内存大小的限制。
+
+   让 Metaspace 变得无限大显然是不现实的，因此我们也要限制 Metaspace 的大小：
+
+   `-XX:MaxMetaspaceSize`
+
+   > By default, the size isn’t limited. The amount of metadata for an application **depends on the application itself, other running applications, and the amount of memory available on the system**.
+
+4. GC
+   如果Metaspace的空间占用达到了`-XX:MaxMetaspaceSize`设定的最大值，那么就会触发GC来收集死亡对象和类的加载器。根据JDK 8的特性，G1和CMS都会很好地收集Metaspace区（一般都伴随着Full GC）。
+
+   为了减少垃圾回收的频率及时间，控制吞吐量，对Metaspace进行适当的监控和调优是非常有必要的。如果在Metaspace区发生了频繁的Full GC，那么可能表示存在内存泄露或Metaspace区的空间太小了。
+
+##### 直接内存
+
+NIO（基于Buffer和Channel的非阻塞IO方式）使用Native函数直接分配对外内存。
+
+可能导致各个内存区之和超过物理内存限制从而OOM。
 
 ### 对象的内存布局
 
@@ -31,8 +122,6 @@
 Mark Word是一个复用的数据结构。在不同的对象状态下，其存储的数据也不尽相同。
 
 ![img](https://img-blog.csdn.net/20140619210443906?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGxuanVscA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center)
-
-### JVM ERROR
 
 ### 垃圾收集
 
@@ -338,11 +427,15 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 
 　　（2）如果为可偏向状态，则测试线程ID是否指向当前线程，如果是，进入步骤（5），否则进入步骤（3）。
 
-　　（3）如果线程ID并未指向当前线程，则通过CAS操作竞争锁。如果竞争成功，则将Mark Word中线程ID设置	为当前线程ID，然后执行（5）；如果竞争失败，执行（4）。
+　　（3）如果线程ID并未指向当前线程，则通过CAS操作尝试写入当前线程ID。如果竞争成功，则将Mark Word中线程ID设置为当前线程ID，然后执行（5）；如果竞争失败，执行（4）。
 
 　　（4）如果CAS获取偏向锁失败，则表示有竞争。当到达全局安全点（safepoint）时获得偏向锁的线程被挂	起，偏向锁升级为轻量级锁，然后被阻塞在安全点的线程继续往下执行同步代码。
 
 　　（5）执行同步代码。
+
+**偏向锁的释放：**
+
+　　偏向锁的撤销在上述第四步骤中有提到。**偏向锁只有遇到其他线程尝试竞争偏向锁时，持有偏向锁的线程才会释放锁，线程不会主动去释放偏向锁**。偏向锁的撤销，需要等待全局安全点（在这个时间点上没有字节码正在执行），它会首先暂停拥有偏向锁的线程，判断锁对象是否处于被锁定状态，撤销偏向锁后恢复到未锁定（标志位为“01”）或轻量级锁（标志位为“00”）的状态。
 
 缺点：如果某个对象的锁会被很多不同线程访问，偏向模式就是多余的。
 
@@ -418,21 +511,365 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 
 ## 计算机网络
 
+### TCP和UDP区别
+
+|            | TCP            | UDP        |
+| ---------- | -------------- | ---------- |
+| 是否连接   | 面向连接       | 面向非连接 |
+| 传输可靠性 | 可靠的         | 不可靠的   |
+| 应用场合   | 传输大量的数据 | 少量数据   |
+| 速度       | 慢             | 快         |
+
+###  TCP
+
+#### 从IP讲起
+
+IP 协议定义了一套自己的地址规则，称为 IP 地址。它实现了路由功能，允许某个局域网的 A 主机，向另一个局域网的 B 主机发送消息。
+
+![这里写图片描述](https://img-blog.csdn.net/20170611233912957?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+路由器就是基于 IP 协议。局域网与局域网之间要靠路由器连接。
+
+路由的原理很简单。市场上所有的路由器，背后都有很多网口，要接入多根网线。路由器内部有一张**路由表**，规定了 A 段 IP 地址走出口一，B 段地址走出口二，……通过这套”指路牌”，实现了数据包的转发。
+
+![这里写图片描述](https://img-blog.csdn.net/20170611233944095?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+**本机的路由表注明了不同 IP 目的地的数据包**，要发送到哪一个网口（interface）。
+
+**IP 协议只是一个地址协议，并不保证数据包的完整**。如果路由器丢包（比如缓存满了，新进来的数据包就会丢失），就需要发现丢了哪一个包，以及如何重新发送这个包。这就要依靠 TCP 协议。
+
+简单说，**TCP 协议的作用是，保证数据通信的可靠性，防止丢包，在此基础上尽量提高传输性能**。
+
+#### TCP 数据包的大小
+
+以太网数据包（packet）的大小是固定的，最初是1518字节，后来增加到1522字节。其中， 1500 字节是负载（payload），22字节是头信息（head）。
+IP 数据包在以太网数据包的负载里面，它也有自己的头信息，最少需要20字节，所以 IP 数据包的负载最多为1480字节。
+![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170611234044643?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+（图片说明：IP 数据包在以太网数据包里面，TCP 数据包在 IP 数据包里面。）
+TCP 数据包在 IP 数据包的负载里面。它的头信息最少也需要20字节，因此 TCP 数据包的最大负载是 1480 - 20 = 1460 字节。由于 IP 和 TCP 协议往往有额外的头信息，所以 TCP 负载实际为1400字节左右。
+因此，一条1500字节的信息需要两个 TCP 数据包。HTTP/2 协议的一大改进， 就是压缩 HTTP 协议的头信息，使得一个 HTTP 请求可以放在一个 TCP 数据包里面，而不是分成多个，这样就提高了速度。
+![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170611234116960?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+（图片说明：以太网数据包的负载是1500字节，TCP 数据包的负载在1400字节左右。）
+
+#### TCP 数据包的编号（SEQ）
+
+一个包1400字节，那么一次性发送大量数据，就必须分成多个包。比如，一个 10MB 的文件，需要发送7100多个包。
+发送的时候，TCP 协议为每个包编号（sequence number，简称 SEQ），以便接收的一方按照顺序还原。万一发生丢包，也可以知道丢失的是哪一个包。
+第一个包的编号是一个随机数。为了便于理解，这里就把它称为1号包。假定这个包的负载长度是100字节，那么可以推算出下一个包的编号应该是101。这就是说，每个数据包都可以得到两个编号：自身的编号，以及下一个包的编号。接收方由此知道，应该按照什么顺序将它们还原成原始文件。
+![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170611234213971?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+（图片说明：当前包的编号是45943，下一个数据包的编号是46183，由此可知，这个包的负载是240字节。）
+
+#### TCP 数据包的组装
+
+收到 TCP 数据包以后，**组装还原是操作系统完成的**。应用程序不会直接处理 TCP 数据包。
+对于应用程序来说，不用关心数据通信的细节。除非线路异常，收到的总是完整的数据。应用程序需要的数据放在 TCP 数据包里面，有自己的格式（比如 HTTP 协议）。
+**TCP 并没有提供任何机制，表示原始文件的大小，这由应用层的协议来规定**。比如，HTTP 协议就有一个头信息Content-Length，表示信息体的大小。对于操作系统来说，就是持续地接收 TCP 数据包，将它们按照顺序组装好，一个包都不少。
+**操作系统不会去处理 TCP 数据包里面的数据。一旦组装好 TCP 数据包，就把它们转交给应用程序。**TCP 数据包的目的端口参数指定了转交给哪个监听该端口的应用程序。系统根据它将组装好的数据转交给相应的应用程序。
+![img](https://img-blog.csdn.net/20170611234318166?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTmluZ2RheGluZzE5OTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+（图片说明：上图中，21端口是 FTP 服务器，25端口是 SMTP 服务，80端口是 Web 服务器。）
+应用程序收到组装好的原始数据，以浏览器为例，就会根据 HTTP 协议的Content-Length字段正确读出一段段的数据。这也意味着，一次 TCP 通信可以包括多个 HTTP 通信。
+
+#### TCP报文首部组成
+
+![img](https://img-blog.csdn.net/20180717201939345?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4OTUwMzE2/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70)
+
+1. 源端口和目的端口，各占2个字节，分别写入源端口和目的端口；
+2. 序号，占4个字节，**TCP连接中传送的字节流中的每个字节都按顺序编号**。例如，一段报文的序号字段值是 301 ，而携带的数据共有100字段，显然下一个报文段（如果还有的话）的数据序号应该从401开始；
+3. 确认号，占4个字节，**是期望收到对方下一个报文的第一个数据字节的序号**。例如，B收到了A发送过来的报文，其序列号字段是501，而数据长度是200字节，这表明B正确的收到了A发送的到序号700为止的数据。因此，B期望收到A的下一个数据序号是701，于是B在发送给A的确认报文段中把确认号置为701；
+4. 数据偏移，占4位，它指出TCP报文的数据距离TCP报文段的起始处有多远；
+5. 保留，占6位，保留今后使用，但目前应都位0；
+6. 紧急URG，当URG=1，表明紧急指针字段有效。告诉系统此报文段中有紧急数据；
+   确认ACK，仅当ACK=1时，确认号字段才有效。TCP规定，在连接建立后所有报文的传输都必须把ACK置1；
+   推送PSH，当两个应用进程进行交互式通信时，有时在一端的应用进程希望在键入一个命令后立即就能收到对方的响应，这时候就将PSH=1；
+   复位RST，当RST=1，表明TCP连接中出现严重差错，必须释放连接，然后再重新建立连接；
+   同步SYN，在连接建立时用来同步序号。当SYN=1，ACK=0，表明是连接请求报文，若同意连接，则响应报文中应该使SYN=1，ACK=1；
+   终止FIN，用来释放连接。当FIN=1，表明此报文的发送方的数据已经发送完毕，并且要求释放；
+7. 窗口，占2字节，指的是通知接收方，发送本报文你需要有多大的空间来接受；
+8. 检验和，占2字节，校验首部和数据这两部分；
+9. 紧急指针，占2字节，指出本报文段中的紧急数据的字节数；
+
+#### TCP连接的建立（三次握手）
+
+![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170607205709367?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXpjc3U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+![ä¸æ¬¡æ¡æ](https://img-blog.csdn.net/20170605110405666?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXpjc3U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)**最开始的时候，客户端和服务器都是处于CLOSED状态。主动打开连接的为客户端，被动打开连接的是服务器。**
+
+1. TCP服务器进程先创建传输控制块TCB，时刻准备接受客户进程的连接请求，此时服务器就进入了LISTEN（监听）状态；
+   TCP客户进程也是先创建传输控制块TCB，然后向服务器发出连接请求报文，这是报文首部中的同部位SYN=1，同时本地生成一个初始序列号 seq=x ，此时，TCP客户端进程进入了 SYN-SENT（同步已发送状态）状态。TCP规定，**SYN=1的报文段不能携带数据，但需要消耗掉一个序号**。
+2. TCP服务器收到请求报文后，如果同意连接，则发出确认报文。确认报文中应该 ACK=1，SYN=1，确认号是ack=x+1，同时也要为自己初始化一个序列号 seq=y，此时，TCP服务器进程进入了SYN-RCVD（同步收到）状态。TCP规定，**SYN=1, ACK=1 的报文也不能携带数据，但同样要消耗一个序号**。
+3. TCP客户进程收到确认后，还要向服务器给出确认。确认报文的ACK=1，ack=y+1，自己的序列号seq=x+1，此时，TCP连接建立，客户端进入ESTABLISHED（已建立连接）状态。TCP规定，**ACK=1 的报文段可以携带数据，但是如果不携带数据则不消耗序号。**
+4. 当服务器收到客户端的确认后也进入ESTABLISHED状态，此后双方就可以开始通信了。
+
+**为什么TCP客户端最后还要发送一次确认呢？**
+
+- 一句话，**防止已经失效的连接请求报文突然又传送到了服务器，从而产生错误**。
+
+  如果使用的是两次握手建立连接，假设有这样一种场景，客户端发送了第一个请求连接并且没有丢失，只是因为在网络结点中滞留的时间太长了，由于TCP的客户端迟迟没有收到确认报文，以为服务器没有收到，此时重新向服务器发送这条报文，此后客户端和服务器经过两次握手完成连接，传输数据，然后关闭连接。此时此前滞留的那一次请求连接，网络通畅了到达了服务器，这个报文本该是失效的，但是，两次握手的机制将会让客户端和服务器再次建立连接，这将导致不必要的错误和资源的浪费。
+
+  如果采用的是三次握手，就算是那一次失效的报文传送过来了，服务端接受到了那条失效报文并且回复了确认报文，但是客户端不会再次发出确认。由于服务器收不到确认，就知道客户端并没有请求连接。
 
 
-## 框架和中间件
+#### TCP连接的释放（四次挥手）
+
+![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170607205756255?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXpjc3U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+![åæ¬¡æ¥æ](https://img-blog.csdn.net/20170606084851272?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXpjc3U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+**最开始的时候，客户端和服务器都是处于ESTABLISHED状态，然后客户端主动关闭，服务器被动关闭。**
+
+1. 客户端进程发出连接释放报文，并且停止发送数据。释放数据报文首部，FIN=1，其序列号为seq=u（等于前面已经传送过来的数据的最后一个字节的序号加1），此时，客户端进入FIN-WAIT-1（终止等待1）状态。 TCP规定，FIN报文段即使不携带数据，也要消耗一个序号。
+2. 服务器收到连接释放报文，发出确认报文，ACK=1，ack=u+1，并且带上自己的序列号seq=v，此时，服务端就进入了CLOSE-WAIT（关闭等待）状态。**TCP服务器通知高层的应用进程，客户端向服务器方向的连接被释放。此时服务器处于半关闭状态，即客户端已经没有数据要发送了，但是服务器可能还要向客户端发送数据，客户端依然要接受**。这个状态还要持续一段时间，也就是整个CLOSE-WAIT状态持续的时间。
+3. 客户端收到服务器的确认请求后，此时，客户端就进入FIN-WAIT-2（终止等待2）状态，**等待服务器发送连接释放报文（在这之前还需要接受服务器发送的最后的数据）**。
+4. **服务器将最后的数据发送完毕后，就向客户端发送连接释放报文**，FIN=1，ack=u+1，由于在半关闭状态，服务器很可能又发送了一些数据，假定此时的序列号为seq=w，此时，服务器就进入了LAST-ACK（最后确认）状态，等待客户端的确认。
+5. 客户端收到服务器的连接释放报文后，必须发出确认，ACK=1，ack=w+1，而自己的序列号是seq=u+1，此时，**客户端就进入了TIME-WAIT（时间等待）状态。注意此时TCP连接还没有释放，必须经过2 * MSL（最长报文段寿命）的时间后，当客户端撤销相应的TCB后，才进入CLOSED状态。**
+6. **服务器只要收到了客户端发出的确认，立即进入CLOSED状态。**同样，撤销TCB后，就结束了这次的TCP连接。可以看到，**服务器结束TCP连接的时间要比客户端早一些**。
+
+**为什么客户端最后还要等待2MSL？**
+
+- MSL（Maximum Segment Lifetime），TCP允许不同的实现可以设置不同的MSL值。
+
+  第一，**保证客户端发送的最后一个ACK报文能够到达服务器，因为这个ACK报文可能丢失**。站在服务器的角度看来，我已经发送了FIN+ACK报文请求断开了，客户端还没有给我回应，应该是我发送的请求断开报文它没有收到，于是服务器又会重新发送一次，而客户端就能在这个2MSL时间段内收到这个重传的报文，接着给出回应报文，并且会重启2MSL计时器。
+
+  第二，**防止类似与“三次握手”中提到了的“已经失效的连接请求报文段”出现在本连接中。**客户端发送完最后一个确认报文后，在这个2MSL时间中，就可以使本连接持续的时间内所产生的所有报文段都从网络中消失。这样新的连接中不会出现旧连接的请求报文。
+
+**为什么建立连接是三次握手，关闭连接确是四次挥手呢？**
+
+- 建立连接的时候， 服务器在LISTEN状态下，收到建立连接请求的SYN报文后，把ACK和SYN放在一个报文里发送给客户端。
+
+  而关闭连接时，**服务器收到对方的FIN报文时，仅仅表示对方不再发送数据了但是还能接收数据，而自己也未必全部数据都发送给对方了**。所以己方可以立即关闭，也可以发送一些数据给对方后，再发送FIN报文给对方来表示同意现在关闭连接，因此，己方ACK和FIN一般都会分开发送，从而导致多了一次。
+
+**如果已经建立了连接，但是客户端突然出现故障了怎么办？**
+
+- TCP还设有一个保活计时器，显然，客户端如果出现故障，服务器不能一直等下去，白白浪费资源。服务器每收到一次客户端的请求后都会重新复位这个计时器，时间通常是设置为2小时，若两小时还没有收到客户端的任何数据，服务器就会发送一个探测报文段，以后每隔75秒发送一次。若一连发送10个探测报文仍然没反应，服务器就认为客户端出了故障，接着就关闭连接。
+
+
+
+#### 可靠性与拥塞控制
+
+
+
+### HTTP响应码
+
+- 200 - 请求成功
+- 301 - 资源（网页等）被永久转移到其它URL
+- 404 - 请求的资源（网页等）不存在
+- 500 - 内部服务器错误
+
+| 分类 | 分类描述                                       |
+| :--- | :--------------------------------------------- |
+| 1**  | 信息，服务器收到请求，需要请求者继续执行操作   |
+| 2**  | 成功，操作被成功接收并处理                     |
+| 3**  | 重定向，需要进一步的操作以完成请求             |
+| 4**  | 客户端错误，请求包含语法错误或无法完成请求     |
+| 5**  | 服务器错误，服务器在处理请求的过程中发生了错误 |
 
 
 
 
 
-## 命令行
+### 浏览器输入URL发生了什么
+
+#### 一、DNS域名解析
+
+我们在浏览器输入网址，其实就是要向服务器请求我们想要的页面内容，所有浏览器首先要确认的是域名所对应的服务器在哪里。将域名解析成对应的服务器IP地址这项工作，是由DNS服务器来完成的。
+
+客户端收到你输入的域名地址后，它首先去找本地的hosts文件，检查在该文件中是否有相应的域名、IP对应关系，如果有，则向其IP地址发送请求，如果没有，再去找DNS服务器。一般用户很少去编辑修改hosts文件。
+![图片描述](https://segmentfault.com/img/bVYTXR?w=1153&h=480)
+![图片描述](https://segmentfault.com/img/bVYTXW?w=805&h=478)
+
+浏览器客户端向本地DNS服务器发送一个含有域名www.cnblogs.com的DNS查询报文。本地DNS服务器把查询报文转发到根DNS服务器，根DNS服务器注意到其com后缀，于是向本地DNS服务器返回comDNS服务器的IP地址。本地DNS服务器再次向comDNS服务器发送查询请求，comDNS服务器注意到其www.cnblogs.com后缀并用负责该域名的权威DNS服务器的IP地址作为回应。最后，本地DNS服务器将含有www.cnblogs.com的IP地址的响应报文发送给客户端。
+
+从客户端到本地服务器属于递归查询，而DNS服务器之间的交互属于迭代查询。
+
+正常情况下，本地DNS服务器的缓存中已有comDNS服务器的地址，因此请求根域名服务器这一步不是必需的。
+
+#### 二、建立TCP链接
+
+『三次握手』
+
+#### 三、发送HTTP请求
+
+与服务器建立了连接后，就可以向服务器发起请求了。这里我们先看下请求报文的结构（如下图）：
+![图片描述](https://segmentfault.com/img/bVYTYc?w=629&h=169)
+
+请求报文
+在浏览器中查看报文首部（以google浏览器为例）：
+![图片描述](https://segmentfault.com/img/bVYTYo?w=366&h=273)
+
+#### 四、服务器处理请求
+
+服务器端收到请求后由http服务器处理请求。web服务器解析用户请求，知道了需要调度哪些资源文件，再通过相应的这些资源文件处理用户请求和参数，并调用数据库信息，最后将结果通过web服务器返回给浏览器客户端。
+
+![图片描述](https://segmentfault.com/img/bVYQcl?w=808&h=237)
+
+#### 五、返回响应结果
+
+在HTTP里，有请求就会有响应，哪怕是错误信息。这里我们同样看下响应报文的组成结构：
+![图片描述](https://segmentfault.com/img/bVYTYF?w=625&h=168)
+
+响应报文
+
+在响应结果中都会有个一个HTTP状态码，比如我们熟知的200、301、404、500等。通过这个状态码我们可以知道服务器端的处理是否正常，并能了解具体的错误。
+
+状态码由3位数字和原因短语组成。根据首位数字，状态码可以分为五类：
+![图片描述](https://segmentfault.com/img/bVYQcs?w=417&h=192)
+
+状态码类别
+
+#### 六、关闭TCP连接
+
+#### 七、浏览器解析HTML
+
+#### 八、浏览器渲染
+
+最后浏览器绘制各个节点，将页面展示给用户。
 
 
 
-## 算法题
+## 算法
 
-1. 手写排序
+### TOPK
+
+有个大文件，记录形式为：用户昵称 背单词的次数。查找里面10个背单词数量最的人。如果文件1t，内存只有2g怎么做？
+
+#### 堆排序
+
+循环加入多个堆，取出找出每个堆中的TOPK，保存。最后将N个堆中的K个加入新的堆，取出K个。
+
+#### MAPREDUCE
+
+TOPK问题下REDUCE中取出的数据条目数必须是K，不然无法汇总结果。极端情况下可能所有的最终结果都来自一个REDUCE。
+
+### MAPREDUCE
+
+**MapReduce简介**
+
+1. MapReduce是一种分布式计算模型，是Google提出的，主要用于搜索领域，解决海量数据的计算问题。
+2. MR有两个阶段组成：Map和Reduce，用户只需实现map()和reduce()两个函数，即可实现分布式计算。
+
+ **MapReduce原理**
+
+![img](https://images2015.cnblogs.com/blog/1110462/201703/1110462-20170330105359920-995323028.png)
+
+ 
+
+ **MapReduce的执行步骤：**
+
+0、split（**Hadoop接管**）
+
+- 在进行map计算之前，map reduce会根据输入文件计算输入分片（input split），每个输入分片（input split）针对一个map任务，**输入分片（input split）存储的并非数据本身，而是一个分片长度和一个记录数据的位置的数组。**
+- 输入分片（input split）往往和hdfs的block（块）关系很密切，假如我们设定hdfs的块的大小是64mb，如果我们输入有三个文件，大小分别是3mb、65mb和127mb，那么mapreduce会把3mb文件分为一个输入分片（input split），65mb则是两个输入分片（input split）而127mb也是两个输入分片（input split），换句话说我们如果在map计算前做输入分片调整，例如合并小文件，那么就会有5个map任务将执行，而且每个map执行的数据大小不均，这个也是mapreduce优化计算的一个关键点。
+
+1、Map用户函数
+
+　　1.1 每一行解析成一个<k, v>。
+
+ 		**<0,hello you>   <10,hello me>**
+
+　　1.2 对上一步产生的<k, v>进行处理，转换为新的<k,v>输出。
+
+​		**<hello,1> <you,1>  <hello,1> <me,1>**
+
+　　1.3（**Hadoop接管**） 对上一步输出的<k,v>进行分区，Map ~ shuffle= M：N传送给shuffle，分区过程中其实也包含排序。
+
+2、shuffle（**Hadoop接管**）
+
+ 对上一步输出的<k,v>进行分区，Map ~ shuffle= M：N传送给shuffle，分区过程中其实也包含排序。
+
+​	2.1 排序：对不同分区中的数据按照k进行排序。
+
+​		排序后：**<hello,1> <hello,1> <me,1> <you,1>** 
+
+​	2.2 分组（group）：把相同key的所有value放到一个集合中。
+
+​		分组后：**<hello,{1,1}><me,{1}><you,{1}>**
+
+​	2.3 shuffle ~ Reduce = 1：1传送。
+
+- **在Hadoop MapReduce中，框架会确保reduce收到的输入数据是根据key排序、分组过的。**
+
+3、Reduce用户函数
+
+　　2.1 接收的是shuffle排序，分组后的数据，实现自己的业务逻辑。
+
+​		**<hello,{1,1}><me,{1}><you,{1}>** 处理后：**<hello,2> <me,1> <you,1>**
+
+　　2.3 对reduce输出的<k,v>写到HDFS中。
+
+
+
+### Morris Traversal
+
+通常，实现二叉树的前序（preorder）、中序（inorder）、后序（postorder）遍历有两个常用的方法：一是递归(recursive)，二是使用栈实现的迭代版本(stack+iterative)。这两种方法都是O(n)的空间复杂度（递归本身占用stack空间或者用户自定义的stack）。
+
+Morris Traversal与前两种方法的不同在于该方法只需要O(1)空间，而且同样可以在O(n)时间内完成。
+
+#### 一、中序遍历
+
+步骤：
+
+1. 如果当前节点的左孩子为空，则输出当前节点并将其右孩子作为当前节点。
+
+2. 如果当前节点的左孩子不为空，在当前节点的左子树中找到当前节点在中序遍历下的前驱节点。
+
+   a) 如果前驱节点的右孩子为空，将它的右孩子设置为当前节点。当前节点更新为当前节点的左孩子。
+
+   b) 如果前驱节点的右孩子为当前节点，将它的右孩子重新设为空（恢复树的形状）。输出当前节点。当前节点更新为当前节点的右孩子。
+
+3. 重复以上1、2直到当前节点为空。
+
+图示：
+
+下图为每一步迭代的结果（从左至右，从上到下），cur代表当前节点，深色节点表示该节点已输出。
+
+![这里写图片描述](https://img-blog.csdn.net/20150829152118062)
+
+
+
+#### 二、前序遍历
+
+前序遍历与中序遍历相似，代码上只有一行不同，不同就在于输出的顺序。 
+步骤：
+
+1. 如果当前节点的左孩子为空，则输出当前节点并将其右孩子作为当前节点。
+
+2. 如果当前节点的左孩子不为空，在当前节点的左子树中找到当前节点在中序遍历下的前驱节点。
+
+   a) 如果前驱节点的右孩子为空，将它的右孩子设置为当前节点。输出当前节点（在这里输出，这是与中序遍历唯一一点不同）。当前节点更新为当前节点的左孩子。
+
+   b) 如果前驱节点的右孩子为当前节点，将它的右孩子重新设为空。当前节点更新为当前节点的右孩子。
+
+3. 重复以上1、2直到当前节点为空。
+
+图示： 
+![这里写图片描述](https://img-blog.csdn.net/20150829162244313)
+
+
+
+#### 三、后序遍历
+
+后续遍历稍显复杂，需要建立一个临时节点dump，令其左孩子是root。并且还需要一个子过程，就是倒序输出某两个节点之间路径上的各个节点。
+
+步骤：
+
+当前节点设置为临时节点dump。
+
+1. 如果当前节点的左孩子为空，则将其右孩子作为当前节点。
+
+2. 如果当前节点的左孩子不为空，在当前节点的左子树中找到当前节点在中序遍历下的前驱节点。
+
+   a) 如果前驱节点的右孩子为空，将它的右孩子设置为当前节点。当前节点更新为当前节点的左孩子。
+
+   b) 如果前驱节点的右孩子为当前节点，将它的右孩子重新设为空。倒序输出从当前节点的左孩子到该前驱节点这条路径上的所有节点。当前节点更新为当前节点的右孩子。
+
+3. 重复以上1、2直到当前节点为空。 
+   图示：
+
+![这里写图片描述](https://img-blog.csdn.net/20150829162501443)
 
 
 
@@ -634,129 +1071,7 @@ save("key6", 4)
 
 相应的 LRU 双向链表部分变化如下：
 
-![img](https://pic3.zhimg.com/80/v2-e9a42fee5cdbf9e4e4d23015112fad4e_hd.jpg)s = save, g = get
-
-总结一下核心操作的步骤:
-
-1. save(key, value)，首先在 HashMap 找到 Key 对应的节点，如果节点存在，更新节点的值，并把这个节点移动队头。如果不存在，需要构造新的节点，并且尝试把节点塞到队头，如果LRU空间不足，则通过 tail 淘汰掉队尾的节点，同时在 HashMap 中移除 Key。
-2. get(key)，通过 HashMap 找到 LRU 链表节点，因为根据LRU 原理，这个节点是最新访问的，所以要把节点插入到队头，然后返回缓存的值。
-
-完整基于 Java 的代码参考如下
-
-```java
-class DLinkedNode {
-	String key;
-	int value;
-	DLinkedNode pre;
-	DLinkedNode post;
-}
-```
-
-LRU Cache
-
-```java
-public class LRUCache {
-   
-    private Hashtable<Integer, DLinkedNode>
-            cache = new Hashtable<Integer, DLinkedNode>();
-    private int count;
-    private int capacity;
-    private DLinkedNode head, tail;
-
-    public LRUCache(int capacity) {
-        this.count = 0;
-        this.capacity = capacity;
-
-        head = new DLinkedNode();
-        head.pre = null;
-
-        tail = new DLinkedNode();
-        tail.post = null;
-
-        head.post = tail;
-        tail.pre = head;
-    }
-
-    public int get(String key) {
-
-        DLinkedNode node = cache.get(key);
-        if(node == null){
-            return -1; // should raise exception here.
-        }
-
-        // move the accessed node to the head;
-        this.moveToHead(node);
-
-        return node.value;
-    }
-
-
-    public void set(String key, int value) {
-        DLinkedNode node = cache.get(key);
-
-        if(node == null){
-
-            DLinkedNode newNode = new DLinkedNode();
-            newNode.key = key;
-            newNode.value = value;
-
-            this.cache.put(key, newNode);
-            this.addNode(newNode);
-
-            ++count;
-
-            if(count > capacity){
-                // pop the tail
-                DLinkedNode tail = this.popTail();
-                this.cache.remove(tail.key);
-                --count;
-            }
-        }else{
-            // update the value.
-            node.value = value;
-            this.moveToHead(node);
-        }
-    }
-    /**
-     * Always add the new node right after head;
-     */
-    private void addNode(DLinkedNode node){
-        node.pre = head;
-        node.post = head.post;
-
-        head.post.pre = node;
-        head.post = node;
-    }
-
-    /**
-     * Remove an existing node from the linked list.
-     */
-    private void removeNode(DLinkedNode node){
-        DLinkedNode pre = node.pre;
-        DLinkedNode post = node.post;
-
-        pre.post = post;
-        post.pre = pre;
-    }
-
-    /**
-     * Move certain node in between to the head.
-     */
-    private void moveToHead(DLinkedNode node){
-        this.removeNode(node);
-        this.addNode(node);
-    }
-
-    // pop the current tail.
-    private DLinkedNode popTail(){
-        DLinkedNode res = tail.pre;
-        this.removeNode(res);
-        return res;
-    }
-}
-```
-
-那么问题的后半部分，是 Redis 如何实现，这个问题这么问肯定是有坑的，那就是redis肯定不是这样实现的。
+![img](https://pic3.zhimg.com/80/v2-e9a42fee5cdbf9e4e4d23015112fad4e_hd.jpg)s = sav
 
 ##### Redis的LRU实现
 
@@ -778,7 +1093,43 @@ Redis支持和LRU相关淘汰策略包括，
 
 Redis会基于`server.maxmemory_samples`配置选取固定数目的key，然后比较它们的lru访问时间，然后淘汰最近最久没有访问的key，maxmemory_samples的值越大，Redis的近似LRU算法就越接近于严格LRU算法，但是相应消耗也变高，对性能有一定影响，样本值默认为5。
 
+## Linux
+
+### 命令行
+
+
+
+## 框架和中间件
+
+### ZOOKEEPER
+
+#### 抽象模型
+
+Zookeeper提供一个多层级的节点命名空间（节点称为znode），每个节点都用一个以斜杠（/）分隔的路径表示，而且每个节点都有父节点（根节点除外），非常类似于文件系统。例如，/foo/doo这个表示一个znode，它的父节点为/foo，父父节点为/，而/为根节点没有父节点。**与文件系统不同的是，这些节点都可以设置关联的数据**，而文件系统中只有文件节点可以存放数据而目录节点不行。Zookeeper为了保证高吞吐和低延迟，**在内存中维护了这个树状的目录结构**，因此**Zookeeper不能用于存放大量的数据，每个节点的存放数据上限为1M**。
+
+而为了保证高可用，zookeeper需要以集群形态来部署，这样只要集群中大部分机器是可用的（能够容忍一定的机器故障），那么zookeeper本身仍然是可用的。**客户端在使用zookeeper时，需要知道集群机器列表，通过与集群中的某一台机器建立TCP连接来使用服务**，客户端使用这个TCP链接来发送请求、获取结果、获取监听事件以及发送心跳包。如果这个连接异常断开了，客户端可以连接到另外的机器上。
+
+
+
+### REDIS
+
+
+
+
+
+### NginX
+
+
+
+
+
 ## 分布式
+
+### 概念
+
+高性能：响应速度快
+
+高可用：有请求就必须有响应
 
 ### 分布式事务
 
@@ -788,20 +1139,165 @@ Redis会基于`server.maxmemory_samples`配置选取固定数目的key，然后�
 
 而一致性又可以分为强一致性与弱一致性。
 
-- 强一致性可以理解为在任意时刻，所有节点中的数据是一致的。同一时间点，你在节点A中获取到key1的值与在节点B中获取到key1的值应该都是一致的。
+- 强一致性可以理解为在任意时刻，所有节点中的数据是一致的。**同一时间点**，你在节点A中获取到key1的值与在节点B中获取到key1的值应该都是一致的。
 - 弱一致性包含很多种不同的实现，目前分布式系统中广泛实现的是最终一致性。
 
 所谓最终一致性，就是不保证在任意时刻任意节点上的同一份数据都是相同的，但是随着时间的迁移，不同节点上的相关（一样的或者有一致性约束的）数据总是在向趋同的方向变化。也可以简单的理解为在一段时间后，节点间的数据会最终达到一致状态。
 
-CDN的最终一致性。
+##### 举例：CDN的最终一致性
+
+> 发布一张网页到 CDN，多个服务器有这张网页的副本。后来发现一个错误，需要更新网页，这时只能每个服务器都更新一遍。
+>
+> 一般来说，网页的更新不是特别强调一致性。短时期内，一些用户拿到老版本，另一些用户拿到新版本，问题不会特别大。当然，所有人最终都会看到新版本。所以，这个场合就是可用性高于一致性。
 
 #### 分布式锁，如何添加，放在什么位置
 
-- 分布式与单机情况下最大的不同在于其不是多线程而是**多进程**。
-- 多线程由于可以共享堆内存，因此可以简单的采取内存作为标记存储位置。而进程之间甚至可能都不在同一台物理机上，因此需要将标记存储在一个所有进程都能看到的地方。
+##### 为什么需要分布式锁？
+
+分布式系统多进程分布在不同机器上，**原单机部署下针对单进程多线程的并发控制锁策略失效**。需要一种跨JVM的互斥机制来控制共享资源的访问，实现最终一致性。
+
+##### 分布式锁和单机锁的区别
+
+- 单机下的单进程（一个JVM）多线程锁是**多线程的**。分布式锁是**多进程的**。
+- 多线程由于可以共享堆内存，因此可以**简单的采取为进程分配的内存作为标记存储位置**。而多进程之间不在同一台物理机上，因此**需要将标记存储在一个所有进程都能看到的地方**。
 
 ##### 什么是分布式锁？
 
-- 当在分布式模型下，数据只有一份（或有限制），此时需要利用锁的技术控制某一时刻修改数据的进程数。
-- 与单机模式下的锁不仅需要保证进程可见，还需要考虑进程与锁之间的网络问题。（我觉得分布式情况下之所以问题变得复杂，主要就是需要考虑到**网络的延时和不可靠**。。。一个大坑）
-- 分布式锁还是可以将标记存在内存，只是该内存不是某个进程分配的内存而是公共内存如 Redis、Memcache。至于利用数据库、文件等做锁与单机的实现是一样的，只要保证标记能互斥就行。
+**分布式锁利用第三方共享存储的锁来实现锁机制。**
+
+- 当在分布式模型下，数据只有一份（或有限制），此时需要**利用锁的技术控制某一时刻修改数据的进程数**。
+- **不仅需要保证进程可见，还需要考虑进程与锁之间的网络问题（网络的延时和不可靠）**。
+- **分布式锁还是可以将标记存在内存，只是该内存不是某个进程分配的内存而是公共内存。**
+
+##### 分布式锁的实现？
+
+- 基于数据库实现分布式锁； 
+- 基于缓存（Redis等）实现分布式锁；
+- 基于Zookeeper实现分布式锁；
+
+##### 基于数据库的实现
+
+利用RDBMS表列的唯一性约束，在调用方法时插入方法名，调用结束后删除方法名，就可以实现简陋的分布式锁。
+
+问题：
+
+1、因为是基于数据库实现的，**数据库的可用性和性能将直接影响分布式锁的可用性及性能**，所以，**数据库需要双机部署、数据同步、主备切换**；
+
+2、**不具备可重入的特性**，因为同一个线程在释放锁之前，行数据一直存在，无法再次成功插入数据，所以，需要在表中新增一列，用于记录当前获取到锁的机器和线程信息，在再次获取锁的时候，先查询表中机器和线程信息是否和当前机器和线程相同，若相同则直接获取锁；
+
+3、**没有锁失效机制，因为有可能出现成功插入数据后，服务器宕机了，对应的数据没有被删除**，当服务恢复后一直获取不到锁，所以，需要在表中新增一列，用于记录失效时间，并且需要有定时任务清除这些失效的数据；
+
+4、**不具备阻塞锁特性，获取不到锁直接返回失败**，所以需要优化获取逻辑，循环多次去获取。
+
+##### 基于Redis的实现方式
+
+命令介绍：
+
+- `SETNX key value`
+
+时间复杂度： O(1)
+
+只在键 `key` 不存在的情况下， 将键 `key` 的值设置为 `value` 。
+
+若键 `key` 已经存在， 则 `SETNX` 命令不做任何动作。
+
+`SETNX` 是『SET if Not eXists』(如果不存在，则 SET)的简写。
+
+返回值：命令在设置成功时返回 `1` ， 设置失败时返回 `0` 。
+
+代码示例：
+
+```
+redis> EXISTS job                # job 不存在
+(integer) 0
+
+redis> SETNX job "programmer"    # job 设置成功
+(integer) 1
+
+redis> SETNX job "code-farmer"   # 尝试覆盖 job ，失败
+(integer) 0
+
+redis> GET job                   # 没有被覆盖
+"programmer"
+```
+
+- `expire`：expire key timeout：为key设置一个超时时间，单位为second，超过这个时间锁会自动释放，避免死锁。
+
+- `delete`：delete key：删除key
+
+实现思想：
+
+（1）获取锁的时候，使用setnx加锁，并使用expire命令为锁添加一个超时时间，超过该时间则自动释放锁，锁的value值为一个随机生成的UUID，通过此在释放锁的时候进行判断。
+
+（2）释放锁的时候，通过UUID判断是不是该锁，若是该锁，则执行delete进行锁释放。
+
+代码：
+
+```JAVA
+public class RedisDistributedLock {
+
+    private static final String LOCK_SUCCESS = "OK";
+    private static final Long RELEASE_SUCCESS = 1L;
+
+    /**
+     * 尝试获取分布式锁
+     * @param jedis Redis客户端
+     * @param lockKey 锁
+     * @param requestId 请求标识
+     * @param expireTime 超期时间
+     * @return 是否获取成功
+     */
+    public static boolean tryLock(Jedis jedis, String lockKey, String requestId, int expireTime) {
+
+        SetParams params = new SetParams();
+        //仅当key不存在时设置key
+        params.nx();
+        params.ex(expireTime);
+        String result = jedis.set(lockKey, requestId, params);
+
+        return LOCK_SUCCESS.equals(result);
+    }
+
+    /**
+     * 释放分布式锁
+     * @param jedis Redis客户端
+     * @param lockKey 锁
+     * @param requestId 请求标识
+     * @return 是否释放成功
+     */
+    public static boolean unlock(Jedis jedis, String lockKey, String requestId) {
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+        Object result = jedis.eval(script, Collections.singletonList(lockKey), Collections.singletonList(requestId));
+
+        return RELEASE_SUCCESS.equals(result);
+    }
+```
+
+##### 基于Zookeeper实现分布式锁
+
+实现基础：
+
+1. 有序节点：假如当前有一个父节点为/lock，我们可以在这个父节点下面创建子节点；zookeeper提供了一个可选的有序特性，例如我们可以创建子节点“/lock/node-”并且指明有序，那么zookeeper在生成子节点时会根据当前的子节点数量自动添加整数序号，也就是说如果是第一个创建的子节点，那么生成的子节点为/lock/node-0000000000，下一个节点则为/lock/node-0000000001，依次类推。
+2. 临时节点：客户端可以建立一个临时节点，在会话结束或者会话超时后，zookeeper会自动删除该节点。
+3. 事件监听：在读取数据时，我们可以同时对节点设置事件监听，当节点数据或结构变化时，zookeeper会通知客户端。当前zookeeper有如下四种事件：1）节点创建；2）节点删除；3）节点数据修改；4）子节点变更。
+
+算法流程，假设锁空间的根节点为/lock：
+
+1. 客户端连接zookeeper，并在/lock下创建**临时的**且**有序的**子节点，第一个客户端对应的子节点为/lock/lock-0000000000，第二个为/lock/lock-0000000001，以此类推。
+2. 客户端获取/lock下的子节点列表，判断自己创建的子节点是否为当前子节点列表中**序号最小**的子节点，如果是则认为获得锁，否则**监听刚好在自己之前一位的子节点删除消息**，获得子节点变更通知后重复此步骤直至获得锁；
+3. 执行业务代码；
+4. 完成业务流程后，删除对应的子节点释放锁。
+
+##### 几种分布式锁实现的比较
+
+从理解的难易程度角度（从易到难）
+数据库 > 缓存 > Zookeeper
+
+从实现的复杂性角度（从难到易）
+Zookeeper >= 缓存 > 数据库
+
+从性能角度（从高到低）
+缓存 > Zookeeper >= 数据库
+
+从可靠性角度（从高到低）
+Zookeeper > 缓存 > 数据库
