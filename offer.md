@@ -23,7 +23,7 @@ try catch由方法的异常表执行字节码跳转。
 
 需要强调的是**模型与实现的区别**。本节内容只是jvm specification中规定的JAVA虚拟机实现应该遵循的内存模型，如果**需要交代具体实现，必须会特殊说明**。
 
-![概念模型](images\offer\概念模型.png)
+![概念模型](images/offer/%E6%A6%82%E5%BF%B5%E6%A8%A1%E5%9E%8B.png)
 
 #### 线程私有内存
 
@@ -101,17 +101,17 @@ NIO（基于Buffer和Channel的非阻塞IO方式）使用Native函数直接分�
 
 ### 对象的内存布局
 
-![分代收集](images\offer\对象内存.png)
+![分代收集](images/offer/%E5%AF%B9%E8%B1%A1%E5%86%85%E5%AD%98.png)
 
 其中对象头32位还是64位与虚拟机是多少位有关。
 
-![img](https://img-blog.csdn.net/20140619204318875?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGxuanVscA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center)
+![img](images/offer/20140619204318875.png)
 
 #### Mark Word
 
 Mark Word是一个复用的数据结构。在不同的对象状态下，其存储的数据也不尽相同。
 
-![img](https://img-blog.csdn.net/20140619210443906?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGxuanVscA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center)
+![img](images/offer/20140619210443906.png)
 
 ### 垃圾收集
 
@@ -137,7 +137,7 @@ Mark Word是一个复用的数据结构。在不同的对象状态下，其存�
 
    对象动态年龄判定，在经历15次MinorGC后进入老年代
 
-![分代收集](images\offer\分代收集.png)
+![分代收集](images/offer/%E5%88%86%E4%BB%A3%E6%94%B6%E9%9B%86.png)
 
 #### 垃圾收集器
 
@@ -164,7 +164,7 @@ CMS收集器工作的整个流程分为以下4个步骤：
 
 由于整个过程中耗时最长的并发标记和并发清除过程收集器线程都可以与用户线程一起工作，所以，从总体上来说，CMS收集器的内存回收过程是与用户线程一起并发执行的。通过下图可以比较清楚地看到CMS收集器的运作步骤中并发和需要停顿的时间：
 
-![img](images\offer\f60599b2.png)
+![img](images/offer/f60599b2.png)
 
 **优点**
 
@@ -189,7 +189,7 @@ G1垃圾收集算法主要应用在多CPU大内存的服务中，在**满足高�
 
 
 
-![img](images\offer\2184951-f6a73e5ef608cfa8.png)
+![img](images/offer/2184951-f6a73e5ef608cfa8.png)
 
 
 
@@ -202,7 +202,7 @@ G1垃圾收集算法主要应用在多CPU大内存的服务中，在**满足高�
 
 2、**在G1算法中，采用了另外一种完全不同的方式组织堆内存**，堆内存被划分为多个大小相等的内存块（Region），每个Region是逻辑连续的一段内存，结构如下：
 
-![img](images\offer\2184951-715388c6f6799bd9-1552460099982.png)
+![img](images/offer/2184951-715388c6f6799bd9-1552460099982.png)
 
 
 
@@ -212,7 +212,7 @@ G1垃圾收集算法主要应用在多CPU大内存的服务中，在**满足高�
 
 堆内存中一个Region的大小可以通过`-XX:G1HeapRegionSize`参数指定，大小区间只能是1M、2M、4M、8M、16M和32M，总之是2的幂次方，如果G1HeapRegionSize为默认值，则在堆初始化时计算Region的实际大小，具体实现如下：
 
-![img](images\offer\2184951-c6194652e3232be2-1552460118628.png)
+![img](images/offer/2184951-c6194652e3232be2-1552460118628.png)
 
 默认把堆内存按照2048份均分，最后得到一个合理的大小。
 
@@ -292,7 +292,6 @@ mixed gc的执行过程有点类似cms，主要分为以下几个步骤：
 #### BIO 和 NIO
 
 - BIO是阻塞IO，进行IO的线程会一直阻塞到数据IO完毕才结束，一个线程只能处理一个流的I/O事件。
-
 - NIO是非阻塞IO，原理是轮询机制，Linux下底层实现用的是epoll。
   - poll/select：只能无差别轮询所有流，需要找出能读出数据，或者写入数据的流，对他们进行操作。
   - epoll：轮询得到的流都是可处理的流，没有可处理的流时将会阻塞。
@@ -347,11 +346,11 @@ AQS是ReentrantLock的实现。
 
 首先，是线程 2 初始化 head 节点，此时 head==tail, waitStatus==0
 
-![aqs-1](images\offer\aqs-1.png)
+![aqs-1](images/offer/aqs-1.png)
 
 然后线程 2 入队：
 
-![aqs-2](images\offer\aqs-2.png)
+![aqs-2](images/offer/aqs-2.png)
 
 同时我们也要看此时节点的 waitStatus，我们知道 head 节点是线程 2 初始化的，此时的 waitStatus 没有设置， java 默认会设置为 0，但是到 shouldParkAfterFailedAcquire 这个方法的时候，线程 2 会把后门节点，也就是 head 的waitStatus设置为 -1。
 
@@ -359,11 +358,39 @@ AQS是ReentrantLock的实现。
 
 如果线程 3 此时再进来，直接插到线程 2 的后面就可以了，此时线程 3 的 waitStatus 是 0，到 shouldParkAfterFailedAcquire 方法的时候把后门节点线程 2 的 waitStatus 设置为 -1。
 
-![aqs-3](images\offer\aqs-3.png)
+![aqs-3](images/offer/aqs-3.png)
 
 这里可以简单说下 waitStatus 中 SIGNAL(-1) 状态的意思，Doug Lea 注释的是：代表后继节点需要被唤醒。也就是说这个 waitStatus 其实代表的不是自己的状态，而是后继节点的状态，我们知道，每个 node 在入队的时候，都会把后门节点的状态改为 SIGNAL，然后阻塞，等待被后门唤醒。这里涉及的是两个问题：有线程取消了排队、唤醒操作。
 
-### 锁的分类和优化
+### 死锁
+
+ **死锁的产生都是锁的访问顺序形成了有向图的循环**, 列举几个常见的延伸场景:
+
+| 延伸场景                                                     | 解决办法                                                     |
+| :----------------------------------------------------------- | ------------------------------------------------------------ |
+| 显式的顺序死锁                                               | 改变代码中的加锁顺序                                         |
+| 方法参数产生的隐式顺序死锁: 一个转账方法的 from to 参数, 两个线程同时传入一对相同的参数, 但是顺序相反. | 利用hash值或者主键 (唯一且可比较) 值的顺序决定上锁的顺序.   hash值相同的情况下, 外面再加一层两个线程不能同时获取的锁 (加时赛锁) . |
+| 两个线程安全类的加锁方法嵌套调用并相互调用.                  | 开放调用(方法签名不加 synchronized, 在代码块中使用该关键字, 并保证同步代码块的最小范围): 重构线程安全类的持有对方锁的同步方法, 减小锁范围, 以在被调用时释放己方的锁. |
+| 资源死锁                                                     |                                                              |
+| 饥饿死锁: 固定工作线程下先提交的任务等待后提交任务的完成.    |                                                              |
+| 活锁: 重复执行某个看起来可以执行实际上每次执行都会出现错误的操作. 例如两个线程同时尝试获取对方的锁失败之后, 又间隔相同时间再次同时尝试获取对方持有的锁. | 在重试机制中引入随机性: 等待随机长度的时间.           回退: 释放已经取得的所有锁. |
+
+#### 死锁解决办法
+
+- 保证顺序访问
+- 只访问一个锁
+- 缩小锁范围: 开放调用: 大大减少同时持有多个锁的机会, 同时更容易发现这些机会.
+- 降低锁粒度: 锁分段
+- 设定锁失效时间: tryLock
+- CAS: 原子变量
+
+#### 死锁的分析: 线程转储
+
+线程转储包括各个运行中线程的追踪信息, 其中包含加锁信息.
+
+JVM将在等待关系图(阻塞的线程)中通过搜索循环(有向图循环)来找出死锁. 如果发现, 获取相应的死锁信息.
+
+### 锁优化
 
 #### 重量级锁
 
@@ -385,21 +412,23 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 
 #### 锁粗化
 
-一段代码如要重复加上和释放同一个锁，JVM会扩展锁的锁定区域（如果不违背代码语义）来减少锁定开销。
+一段代码如要重复加上和释放同一个锁，JVM会扩展锁的锁定区域（如果不违背代码语义）来减少锁的释放和锁定开销。
+
+![img](images/offer/20140619210443906.png)
 
 #### 轻量级锁
 
 - 目的：在同一时刻没有线程竞争锁时，减少传统重量级锁（JVM使用操作系统的互斥量mutex实现的锁）的使用。
 
-- 使用依据：“对于绝大部分锁，在整个同步代码块内都不存在竞” 的经验法则。
+- 使用依据：“对于绝大部分锁，在整个同步代码块内都不存在竞争” 的经验法则。
 
 - 实现：**使用CAS操作消除重量级锁同步使用的互斥量。**
 
-  （1）在代码进入同步块的时候，如果同步对象锁状态为无锁状态（锁标志位为“01”状态，是否为偏向锁为“0”），虚拟机首先将在当前线程的栈帧中建立一个名为锁记录（Lock Record）的空间，用于存储锁对象目前的Mark Word的拷贝。
+  （1）在代码进入同步块的时候，如果同步对象锁状态为无锁状态（锁标志位为“01”状态，是否为偏向锁为“0”），虚拟机首先将在**当前线程的栈帧中建立一个名为锁记录（Lock Record）的空间**，用于存储锁对象目前的Mark Word的拷贝。
 
   （2）拷贝对象头中的Mark Word复制到锁记录中。
 
-  （3）拷贝成功后，虚拟机将使用**CAS操作**尝试将对象的Mark Word更新为指向Lock Record的指针。如果更新成功，则执行步骤（3），否则执行步骤（4）。
+  （3）拷贝成功后，虚拟机将**使用CAS操作尝试将对象的Mark Word更新为指向Lock Record的指针**。如果更新成功，则执行步骤（3），否则执行步骤（4）。
 
   （4）CAS成功。该线程就拥有该对象的锁，将对象Mark Word的锁标志位设置为“00”，即表示此对象处于轻量级锁定状态。
 
@@ -438,14 +467,12 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 - `corePoolSize`：核心线程数
 
   - 核心线程会**一直存活**，即便没有任务需要执行
-
   - **当线程数小于核心线程数时，即使有线程空闲，线程池也会优先创建新线程处理**
   - 设置allowCoreThreadTimeout=true（默认false）时，核心线程会超时关闭
 
 - `maximumPoolSize` ：最大线程数
 
   - 当线程数>=corePoolSize，且任务队列已满时，线程池会创建新线程来处理任务
-
   - 当线程数=maxPoolSize，且任务队列已满时，线程池会拒绝处理任务而抛出异常
 
 - `keepAliveTime`：线程空闲时间
@@ -462,7 +489,6 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
   线程池会调用rejectedExecutionHandler来处理这个任务。如果没有设置默认是AbortPolicy，会抛出异常。ThreadPoolExecutor类有几个内部实现类来处理这类情况：
 
   - AbortPolicy 丢弃任务，抛运行时异常
-
   - CallerRunsPolicy 执行任务
   - DiscardPolicy 忽视，什么都不会发生
   - DiscardOldestPolicy 从队列中踢出最先进入队列（最后一个执行）的任务
@@ -497,11 +523,82 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 
 原理：Java线程1：1映射到操作系统原生线程（内核线程、轻量级进程）之上。因此阻塞或者唤醒一个线程，都需要OS从用户态切换到内核态，切换上下文的开销可能比一般的setter getter开销更大。
 
-### TODO: 死锁的原因，如何避免
-
 
 
 ## 计算机网络
+
+### OSI七层模型
+
+![è®¡ç®æºç½ç"ä½ç³"ç"æåå±](images/offer/690219fae5b0587fa26e2dee545e6200)
+
+### IP
+
+IP报文是在网络层传输的数据单元，也叫IP数据报。IP报文格式如下图（图片来源：百度百科）
+
+![img](images/offer/20170301092349308)
+
+**版本：IP协议的版本**，目前的IP协议版本号为4，下一代IP协议版本号为6。
+
+**首部长度：IP报头的长度**。固定部分的长度（20字节）和可变部分的长度之和。共占4位。最大为1111，即10进制的15，代表IP报头的最大长度可以为15个32bits（4字节），也就是最长可为15*4=60字节，除去固定部分的长度20字节，可变部分的长度最大为40字节。
+
+**服务类型**：Type Of Service。it might be useful to distinguish real-time datagrams (such as those used by an IP telephony application) from non-real-time traffic (for example, FTP).
+
+**IP报文的总长度：报头的长度和数据部分的长度之和。**
+
+标识：唯一的标识主机发送的每一分数据报。通常每发送一个报文，它的值加一。当IP报文长度超过传输网络的MTU（最大传输单元）时必须分片，这个标识字段的值被复制到所有数据分片的标识字段中，使得这些分片在达到最终目的地时可以依照标识字段的内容重新组成原先的数据。
+
+标志：共3位。R、DF、MF三位。目前只有后两位有效，DF位：为1表示不分片，为0表示分片。MF：为1表示“更多的片”，为0表示这是最后一片。
+
+片位移：本分片在原先数据报文中相对首位的偏移位。（需要再乘以8）
+
+生存时间：IP报文所允许通过的路由器的最大数量。每经过一个路由器，TTL减1，当为0时，路由器将该数据报丢弃。TTL 字段是由发送端初始设置一个 8 bit字段.推荐的初始值由分配数字 RFC 指定，当前值为 64。发送 ICMP 回显应答时经常把 TTL 设为最大值 255。
+
+上层协议：**指出IP报文携带的数据使用的是那种协议，以便目的主机的IP层能知道要将数据报上交到哪个进程（不同的协议有专门不同的进程处理）**。此处采用协议号，TCP的协议号为6，UDP的协议号为17。
+
+首部校验和：IP头部的校验和，检查IP报头的完整性。
+
+源IP地址：标识IP数据报的源端设备。
+
+目的IP地址：标识IP数据报的目的地址。
+
+![1553774601763](images/offer/1553774601763.png)
+
+- Version number. These 4 bits specify the IP protocol version of the datagram. By looking at the
+  version number, the router can determine how to interpret the remainder of the IP datagram.
+  Different versions of IP use different datagram formats. The datagram format for IPv4 is shown in
+  Figure 4.16. The datagram format for the new version of IP (IPv6) is discussed in Section 4.3.5.
+- Header length. Because an IPv4 datagram can contain a variable number of options (which are
+  included in the IPv4 datagram header), these 4 bits are needed to determine where in the IP
+  datagram the payload (e.g., the transport-layer segment being encapsulated in this datagram)
+  actually begins. Most IP datagrams do not contain options, so the typical IP datagram has a 20-byte
+  header.
+- Type of service. The type of service (TOS) bits were included in the IPv4 header to allow different
+  types of IP datagrams to be distinguished from each other. For example, it might be useful to
+  distinguish real-time datagrams (such as those used by an IP telephony application) from non-real-
+  time traffic (for example, FTP). The specific level of service to be provided is a policy issue
+  determined and configured by the network administrator for that router. We also learned in Section
+  3.7.2 that two of the TOS bits are used for Explicit Congestion ­ Notification.
+- Datagram length. This is the total length of the IP datagram (header plus data), measured in bytes.
+  Since this field is 16 bits long, the theoretical maximum size of the IP datagram is 65,535 bytes.
+  However, datagrams are rarely larger than 1,500 bytes, which allows an IP datagram to fit in the
+  payload field of a maximally sized Ethernet frame.
+- Identifier, flags, fragmentation offset. These three fields have to do with so-called IP
+  fragmentation, a topic we will consider shortly. Interestingly, the new version of IP, IPv6, does not
+  allow for fragmentation.
+- Time-to-live. The time-to-live (TTL) field is included to ensure that datagrams do not circulate
+  forever (due to, for example, a long-lived routing loop) in the network. **This field is decremented by**
+  **one each time the datagram is processed by a router. If the TTL field reaches 0, a router must drop that datagram.**
+- 上层 Protocol. Indicates the specific transport-layer protocol to which the data portion of this IP
+  datagram should be passed. 
+- Header checksum. The header checksum aids a router in detecting bit errors in a received IP
+  datagram. 
+- Source and destination IP addresses. When a source creates a datagram, it inserts its IP address
+  into the source IP address field and inserts the address of the ultimate destination into the
+  destination IP address field. Often the source host determines the destination address via a DNS
+  lookup.
+- Options. The options fields allow an IP header to be extended. 
+- Data (payload). In most circumstances, the data field of the IP datagram contains the
+  transport-layer segment (传输层片段) (TCP or UDP) to be delivered to the destination. 
 
 ### TCP和UDP区别
 
@@ -512,7 +609,7 @@ JVM对一些代码上要求同步，但是被检测到不存在共享状态竞�
 | 应用场合   | 传输大量的数据 | 少量数据   |
 | 速度       | 慢             | 快         |
 
-###  TCP
+### TCP
 
 #### 从IP讲起
 
@@ -604,7 +701,6 @@ TCP 数据包在 IP 数据包的负载里面。它的头信息最少也需要20�
 
   如果采用的是三次握手，就算是那一次失效的报文传送过来了，服务端接受到了那条失效报文并且回复了确认报文，但是客户端不会再次发出确认。由于服务器收不到确认，就知道客户端并没有请求连接。
 
-
 #### TCP连接的释放（四次挥手）
 
 ![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20170607205756255?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXpjc3U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
@@ -644,12 +740,12 @@ TCP 数据包在 IP 数据包的负载里面。它的头信息最少也需要20�
 
 TCP协议保证数据传输可靠性的方式有：
 
-**校验和**
+**1. 校验和**
 
 发送方：在发送数据之前计算检验和，并进行校验和的填充。 
 接收方：收到数据后，对数据以同样的方式进行计算，求出校验和，与发送方的进行比对。
 
-**序列号与确认应答**
+**2. 序列号与确认应答**
 
 ![è¿éåå¾çæè¿°](https://img-blog.csdn.net/20180524103121705?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2xpdWNoZW54aWE4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70)
 
@@ -657,7 +753,7 @@ TCP协议保证数据传输可靠性的方式有：
 2. 确认号，占4个字节，**是期望收到对方下一个报文的第一个数据字节的序号**。例如，B收到了A发送过来的报文，其序列号字段是501，而数据长度是200字节，这表明B正确的收到了A发送的到序号700为止的数据。因此，B期望收到A的下一个数据序号是701，于是B在发送给A的确认报文段中把确认号置为701；
 3. 确认应答：TCP传输的过程中，每次接收方收到数据后，都会对传输方进行确认应答。也就是发送ACK报文。这个**ACK报文当中带有对应的确认序列号**，告诉发送方，接收到了哪些数据，下一次的数据从哪里发。
 
-**超时重传**
+**3. 超时重传**
 
 在进行TCP传输时，由于确认应答与序列号机制，也就是说发送方发送一部分数据后，都会等待接收方发送的ACK报文，并解析ACK报文，判断数据是否传输成功。如果发送方发送完数据后，迟迟没有等到接收方的ACK报文，这该怎么办呢？而没有收到ACK报文的原因可能是什么呢？
 
@@ -669,7 +765,6 @@ TCP协议保证数据传输可靠性的方式有：
 超时重传机制解决了这个问题：**发送方在发送完数据后等待一个时间，时间到达没有接收到ACK报文，那么对刚才发送的数据进行重新发送。**
 
 1. 第一个原因，接收方将在收到二次重发的数据后，便进行ACK应答。
-
 2. 第二个原因，接收方将在收到二次重发的数据后，发现已经已存在（判断依据是序列号，因此序列号还有去除重复数据的作用），直接丢弃，仍旧发送ACK应答。
 
 那么发送方发送完毕后等待的时间是多少呢？如果这个等待的时间过长，那么会影响TCP传输的整体效率，如果等待时间过短，又会导致频繁的发送重复的包。如何权衡？
@@ -678,11 +773,11 @@ TCP协议保证数据传输可靠性的方式有：
 
 > 在Linux中（BSD Unix和Windows下也是这样）超时以500ms为一个单位进行控制，每次判定超时重发的超时时间都是500ms的整数倍。重发一次后，仍未响应，那么等待2*500ms的时间后，再次重传。等待4*500ms的时间继续重传。以一个指数的形式增长。累计到一定的重传次数，TCP就认为网络或者对端出现异常，强制关闭连接。
 
-**连接管理**
+**4. 连接管理**
 
 - 三次握手与四次挥手的过程。
 
-**流量控制**
+**5. 流量控制**
 
 接收端在接收到数据后，对其进行处理。如果发送端的发送速度太快，导致接收端的结束缓冲区很快的填充满了。此时如果发送端仍旧发送数据，那么接下来发送的数据都会丢包，继而导致丢包的一系列连锁反应，超时重传呀什么的。
 
@@ -694,7 +789,7 @@ TCP协议保证数据传输可靠性的方式有：
 
 注：16位的窗口大小最大能表示65535个字节（64K），但是TCP的窗口大小最大并不是64K。在TCP首部中40个字节的选项中还包含了一个窗口扩大因子M，实际的窗口大小就是16为窗口字段的值左移M位。每移一位，扩大两倍。
 
-**拥塞控制**
+**6. 拥塞控制**
 
 1. 引言
 
@@ -730,7 +825,9 @@ TCP协议保证数据传输可靠性的方式有：
 
 3. 快重传和快恢复
 
-​       **快重传要求接收方在收到一个失序的报文段后就立即发出重复确认（为的是使发送方及早知道有报文段没有到达对方）而不要等到自己发送数据时捎带确认。**快重传算法规定，**发送方只要一连收到三个重复确认就应当立即重传对方尚未收到的报文段，而不必继续等待设置的重传计时器时间到期。**如下图：
+​       **快重传要求接收方在收到一个失序的报文段后就立即发出重复确认（为的是使发送方及早知道有报文段没有到达对方）而不要等到自己发送数据时捎带确认。**
+
+快重传算法规定，**发送方只要一连收到三个重复确认就应当立即重传对方尚未收到的报文段，而不必继续等待设置的重传计时器时间到期。**如下图：
 
 ![img](http://img.blog.csdn.net/20130801220556750?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvc2ljb2ZpZWxk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
 
@@ -840,7 +937,7 @@ Connection:keep-alive
 在响应结果中都会有个一个HTTP状态码，比如我们熟知的200、301、404、500等。通过这个状态码我们可以知道服务器端的处理是否正常，并能了解具体的错误。
 
 状态码由3位数字和原因短语组成。根据首位数字，状态码可以分为五类：
-![图片描述](https://segmentfault.com/img/bVYQcs?w=417&h=192)
+![图片描述](images/offer/3438268269-5a12593271f2d_articlex.png)
 
 状态码类别
 
@@ -861,10 +958,9 @@ Connection:keep-alive
 包括内存管理和虚拟内存管理。
 
 - 内存管理(狭义) : 内存管理概念、交换与覆盖、连续分配管理方式和非连续分配管理方式（分页管理方式、分段管理方式、段页式管理方式）。
-
 - 虚拟内存管理 : 虚拟内存概念、请求分页管理方式、页面置换算法、页面分配策略、工作集和抖动。
 
-  #### 分页
+#### 分页
 
 **分页（Paging）** 允许进程物理地址空间非连续，内存和备份存储均按页划分，页大小相同。在前述连续内存分配中，内存中的数据换入/换出到备份存储时，备份存储中也会存在类似的碎片问题，而分页避免了这一点。传统的分页由硬件处理，最近的设计（64位机）结合了硬件和操作系统。 **在第八章中，需要假定自己尚未了解第九章的内容，并且进程在执行前已经把所需要的全部数据分页加载到内存中** 。
 
@@ -916,7 +1012,7 @@ Connection:keep-alive
 - **反向页表（inverted page table）** ：每个进程均维护一个相关页表，这个进程使用到的每个页在其持有的页表里有一项，或者每个虚拟地址在页表里都有一项而不论这个虚拟地址是否有效，此时每个页表会有很多项，这些表会消耗大量的内存，而其目的仅仅是追踪物理内存如何使用。反向页表中，每个真实的内存页/帧存在一个条目，该条目包括引用该物理帧的虚拟页号以及拥有该页的进程信息。所以整个系统只有一个页表，每个物理内存帧仅有一条相应的条目。
 - 一种简化的反向页表实现（IBM RT 采用）：系统每个虚拟地址对应一个三元组 `<pid | page numbe r | offset>`，反向表中每个条目为 `<pid | page number>`，需要内存引用时，操作系统查找反向页表寻找匹配，若匹配找到则产生物理地址，否则认为产生了非法地址访问。这种方案减少了存储每个页表所需的内存空间，但增加了查找页表所需要的时间。反向页表按照物理地址排序，而查找依据虚拟地址，所以可能需要查找整个表来寻找匹配。可以使用 *哈希页表* 限制页表条目或加入 TLB 来改善。此外，采用反向页表的系统很难共享内存，因为每个物理帧只对应一个虚拟页条目。对于这种情况，可以允许页表的没一个条目仅包含一个虚拟地址到共享内存地址的映射，这时对未被映射虚拟地址的引用会导致页错误（page fault）。
 
-分段
+#### 分段
 
 - 采用分页管理导致用户视角的内存和实际物理地址内存分离，对于装载/写入操作必须将虚拟内存映射到实际的物理内存。 **分段（segmentation）** 支持另一种用户视角，其逻辑地址空间由一些段组成，每个段有自己的编号和长度，用户通过段号和段内偏移（与分页的区别在于，分页管理中用户只指定一个虚拟地址，由硬件将虚拟地址拆分为页码和偏移，这些工作对程序员透明）来指定地址。
 - 编译用户程序时，编译器会自动根据输入的程序源码构造段（代码段、静态区、堆、栈等），编译时链接的库可能被分配不同的段，加载程序时装入这些段并分配段号。
@@ -934,6 +1030,8 @@ Connection:keep-alive
 - 奔腾体系结构上运行的 Linux 仅使用了四级保护中的两种，用于区分内核模式和用户模式。Linux 采用三级分页方案（全局目录-中间目录-页表-偏移），而奔腾采用二级分页模式，此时 Linux 的 “中间目录” 大小为 0，因此等价于奔腾的二级分页。
 
 #### 虚拟内存管理
+
+### 线程与进程
 
 
 
@@ -1029,6 +1127,7 @@ Morris Traversal与前两种方法的不同在于该方法只需要O(1)空间，
 
 
 #### 二、前序遍历
+
 ![这里写图片描述](https://img-blog.csdn.net/20150829162244313)
 
 
@@ -1103,10 +1202,10 @@ mysql> show variables like 'innodb_page_size';
 
 B-Tree：每个节点中不仅包含数据的key值，还有data值。而每一个页的存储空间是有限的，如果data较大时将会导致每个节点（即一个页）能存储的key的数量小，B-Tree的深度大，增大查询时的磁盘I/O次数。
 
-![20160202204827368](images\offer\20160202204827368)
+![20160202204827368](images/offer/20160202204827368)
 
 在B+Tree中，所有数据记录节点都是按照键值大小顺序存放在同一层的叶子节点上，而非叶子节点上只存储key值信息，这样可以大大加大每个节点存储的key值数量，降低B+Tree的高度。
-![1552547005558](images\offer\20160202205105560)
+![1552547005558](images/offer/20160202205105560)
 
 B+Tree的高度一般都在2~4层。InnoDB存储引擎**根节点常驻内存**，也就是说查找某一键值的行记录时最多只需要1~3次磁盘I/O操作。
 
@@ -1135,7 +1234,7 @@ CURD复合原子操作。
 
 #### 隔离级别
 
-![1552548959252](images\offer\捕获.JPG)
+![1552548959252](images/offer/%E6%8D%95%E8%8E%B7.JPG)
 
 - 脏读：事务可以读取其他事务尚未提交的数据。破坏了AI
 - 不可重复读：在一个事务内两次SELECT查询相同的数据结果不同。
@@ -1180,25 +1279,29 @@ mysql> set session transaction isolation level read committed; //当前会话
 
 ### 锁
 
-#### **事务中的加锁是每执行一条语句就加一层锁，直到事务结束释放所有锁。**
+#### 注意
+
+- **事务中的加锁是每执行一条语句就加一层锁，直到事务结束释放所有锁。**
+
+
+
+#### 死锁
+
+将持有最少行级排它锁的事务进行回滚, 之后需要用户重新执行因死锁回滚的事务.
 
 #### 判断事务中DML操作的加锁：
 
 - **前提一：**id列是不是主键？
-
 - **前提二：**当前系统的隔离级别是什么？
-
 - **前提三：**id列如果不是主键，那么id列上有索引吗？
-
 - **前提四：**id列上如果有二级索引，那么这个索引是唯一索引吗？
-
 - **前提五：**SQL的执行计划是什么？索引扫描？全表扫描？
 
 `delete from t1 where id = 10;  `  在不同组合下的加锁：
 
 - **组合五：**id列是主键，RR隔离级别
 
-![idä¸"é®+rc](http://pic.yupoo.com/hedengcheng/DnJ6RtaP/medish.jpg)
+![idä¸"é®+rc](images/offer/medish-1553779462861.jpg)
 
 - **组合六：**id列是二级唯一索引，RR隔离级别
 
@@ -1206,7 +1309,7 @@ mysql> set session transaction isolation level read committed; //当前会话
 
 - **组合七：**id列是二级非唯一索引，RR隔离级别
 
-![id 非唯一索引 + rr](images\offer\medish1.jpg)
+![id 非唯一索引 + rr](images/offer/medish1.jpg)
 
 为了保证两次当前读返回一致的记录，那就需要在第一次当前读与第二次当前读之间，其他的事务不会插入新的满足条件的记录并提交。GAP锁不会出现幻读的关键。GAP锁锁住的位置，也不是记录本身，而是两条记录之间的GAP。所谓幻读，就是同一个事务，连续做两次当前读 (例如：select * from t1 where id = 10 for update;)，那么这两次当前读返回的是完全相同的记录 (记录数量一致，记录本身也一致)，第二次的当前读，不会比第一次返回更多的记录 。
 
@@ -1224,7 +1327,6 @@ mysql> set session transaction isolation level read committed; //当前会话
 
   - **Index key：**pubtime > 1 and puptime < 20。此条件，用于确定SQL在idx_t1_pu索引上的查询范围。
   - **Index Filter：**userid = ‘hdc’ 。此条件，可以在idx_t1_pu索引上进行过滤，但不属于Index Key。
-
   - **Table Filter：**comment is not NULL。此条件，在idx_t1_pu索引上无法过滤，只能在聚簇索引上过滤。
 
   ![SQLå é](http://pic.yupoo.com/hedengcheng/DnJ6S1s7/medish.jpg)
@@ -1284,11 +1386,8 @@ client和server可以运行在同一台集群，也可以通过跨主机实现�
 仓库(repository)
 
 - **仓库（Repository）是集中存放镜像文件的场所。**有时候会把仓库和仓库注册服务器（Registry）混为一谈，并不严格区分。实际上，仓库注册服务器上往往存放着多个仓库，每个仓库中又包含了多个镜像，每个镜像有不同的标签（tag）。
-
 - 仓库分为公开仓库（Public）和私有仓库（Private）两种形式。最大的公开仓库是 Docker Hub，存放了数量庞大的镜像供用户下载。国内的公开仓库包括 时速云 、网易云 等，可以提供大陆用户更稳定快速的访问。当然，用户也可以在本地网络内创建一个私有仓库。
-
 - 当用户创建了自己的镜像之后就可以使用 push 命令将它上传到公有或者私有仓库，这样下次在另外一台机器上使用这个镜像时候，只需要从仓库上 pull 下来就可以了。
-
 - **Docker 仓库的概念跟 Git 类似，注册服务器可以理解为 GitHub 这样的托管服务。**
 
 容器(container)
@@ -1299,7 +1398,6 @@ client和server可以运行在同一台集群，也可以通过跨主机实现�
 - 一个运行态容器被定义为一个可读写的统一文件系统加上隔离的进程空间和包含其中的进程。下面这张图片展示了一个运行中的容器。
 - ![container running](http://hainiubl.com/images/2016/container-running.png)
 - 正是文件系统隔离技术使得Docker成为了一个非常有潜力的虚拟化技术。一个容器中的进程可能会对文件进行修改、删除、创建，这些改变都将作用于可读写层。
-
 
 ### ZOOKEEPER
 
@@ -1391,7 +1489,7 @@ Redis 的持久化机制有两种,第一种是快照,第二种是 AOF 日志。
 
 #### 跳表
 
-![img](./images/offer/1472481-64e609f6a39b5fbe.webp)
+![img](images/offer/1472481-64e609f6a39b5fbe.webp)
 
 结构类似于B+树, 只不过更适合在内存中(内存能快速地跳跃地址进行访问, 是个适合链表存在的地方, 但是磁盘不行)
 
@@ -1663,7 +1761,6 @@ redis> GET job                   # 没有被覆盖
 ```
 
 - `expire`：expire key timeout：为key设置一个超时时间，单位为second，超过这个时间锁会自动释放，避免死锁。
-
 - `delete`：delete key：删除key
 
 实现思想：
