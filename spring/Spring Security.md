@@ -194,7 +194,7 @@ public interface AuthenticationProvider {
 
 ## 核心组件的源码分析
 
-### `@EnableWebSecurity`: 从配置到过滤器链`springSecurityFilterChain`
+### `@EnableWebSecurity`: 从配置到过滤器链springSecurityFilterChain
 
 Javadoc: 
 
@@ -293,10 +293,7 @@ public class WebSecurityConfiguration implements ImportAware, BeanClassLoaderAwa
         
         //按照顺序应用所有webSecurityConfigurers中的元素到webSecurity.apply方法
 		for (SecurityConfigurer<Filter, WebSecurity> webSecurityConfigurer : webSecurityConfigurers) {
-            //这个方法其实还是把所有webSecurityConfigurer加入到WebSecurity的域中
-            //并回调 SecurityConfigurerAdapter.setBuilder(SecurityBuilder)
-            //最后代理给webSecurity.build()来构建Filter Chain
-            //具体参见下一节
+            //把自定义的配置加入到AbstractConfiguredSecurityBuilder(WebSecurity父类)中
 			webSecurity.apply(webSecurityConfigurer);
 		}
         //加入到域中
@@ -323,7 +320,7 @@ public class WebSecurityConfiguration implements ImportAware, BeanClassLoaderAwa
 }
 ```
 
-#### `WebSecurity`
+#### `WebSecurity`, `HttpSecurity`, `WebSecurityConfigurerAdapter`之间的代码交互
 
 Java doc :
 
@@ -333,38 +330,34 @@ Java doc :
 
 ![1553674661221](images/Spring Security/1553674661221.png)
 
+再看看HttpSecurity:
+
+![1553680794115](images/Spring Security/1553680794115.png)
+
 下面这个继承关系就是自定义Web安全配置时需要继承的适配器.
 
 ![1553674710253](images/Spring Security/1553674710253.png)
 
-很奇怪的一点是这两个类都实现了SecurityBuilder接口, 这个接口的功能只是返回一个创建的对象:
+![1553861946226](images/Spring Security/1553861946226.png)
+
+先看一下`AbstractConfiguredSecurityBuilder#apply()`两个重载方法.
 
 ```JAVA
-//Interface for building an Object
-public interface SecurityBuilder<O> {
-// Builds the object and returns it or null.
-   O build() throws Exception;
-}
-```
-
-
-
-先粗略看一下apply方法.
-
-```JAVA
-//Applies a SecurityConfigurerAdapter to this SecurityBuilder and invokes 
-// SecurityConfigurerAdapter.setBuilder(SecurityBuilder).
-public <C extends SecurityConfigurerAdapter<O, B>> C apply(C configurer)
-      throws Exception {
-   configurer.addObjectPostProcessor(objectPostProcessor);
-    //符合Javadoc
-   configurer.setBuilder((B) this);
-    
-	//Adds SecurityConfigurer ensuring that it is allowed and invoking 
-   	//SecurityConfigurer.init(SecurityBuilder) immediately if necessary.
-   add(configurer);
-   return configurer;
-}
+	//传入参数是SecurityConfigurer及其子类
+	public <C extends SecurityConfigurer<O, B>> C apply(C configurer) throws Exception {
+		//把configure加入到AbstractConfiguredSecurityBuilder中
+        add(configurer);
+		return configurer;
+	}
+	//传入参数是SecurityConfigurerAdapter及其子类
+	public <C extends SecurityConfigurerAdapter<O, B>> C apply(C configurer)
+			throws Exception {
+		configurer.addObjectPostProcessor(objectPostProcessor);
+		configurer.setBuilder((B) this);
+        //把configure加入到AbstractConfiguredSecurityBuilder中
+		add(configurer);
+		return configurer;
+	}
 ```
 
 
@@ -425,9 +418,11 @@ protected final O doBuild() throws Exception {
 
 所以, 下面按照顺序说明 `init()`,  `configure()`, `performBuild()`
 
-1. `init()`回调`SecurityConfigurer.init(SecurityBuilder)`
+1. `WebSecurity#init()`回调传入过`WebSecurity#apply()`的`init()`
 
-   如果继承`WebSecurityConfigurerAdapter`自定义配置, 会回调它的init方法
+   **如果继承`WebSecurityConfigurerAdapter`自定义配置, 会回调它的init方法.**
+
+   **注意, 下面很多代码将会是`WebSecurityConfigurerAdapter`的.**
 
    ```JAVA
    public abstract class WebSecurityConfigurerAdapter implements
@@ -485,6 +480,7 @@ protected final O doBuild() throws Exception {
                // HTTP默认配置如下
    			// @formatter:off
    			http
+                   //在这些方法中会调用apply方法, 把相应Configurer加入HttpSecurity
    				.csrf().and()
    				.addFilter(new WebAsyncManagerIntegrationFilter())
    				.exceptionHandling().and()
@@ -512,8 +508,6 @@ protected final O doBuild() throws Exception {
    		return http;
    	}
    ```
-
-   
 
    ```java
    protected AuthenticationManager authenticationManager() throws Exception {
@@ -572,13 +566,15 @@ protected final O doBuild() throws Exception {
    }
    ```
 
+   **`WebSecurityConfigurerAdapter`的代码到此结束!!!**
+
    
 
-2. `configure()`
+2. `WebSecurity#configure()`
 
    回调`WebSecurityConfigurerAdapter#configure(WebSecurity web)`方法, 自定义配置写在其中.
 
-3. `performBuild()`
+3. `WebSecurity#performBuild()`
 
 ```JAVA
 protected Filter performBuild() throws Exception {
@@ -601,9 +597,14 @@ protected Filter performBuild() throws Exception {
    }
     //调用所有securityFilterChainBuilders.build()来构造另一个链
     //见下面的继承关系图可知, 被调用的是HttpSecurity对象
-    //
+    //HttpSecurity对象是在init()步骤中被显式加入WebSecurity的
    for (SecurityBuilder<? extends SecurityFilterChain> securityFilterChainBuilder : securityFilterChainBuilders) {
-      securityFilterChains.add(securityFilterChainBuilder.build());
+      securityFilterChains.add(
+          //父类方法的递归: 因为WebSecurity和HttpSecurity有相同父类 AbstractConfiguredSecurityBuilder
+          //调用HttpSecurity父类AbstractConfiguredSecurityBuilder域中的configurers的init, configure
+          //最后调用HttpSecurity实现的doBuild(), 见下面代码
+          securityFilterChainBuilder.build()
+      );
    }
    FilterChainProxy filterChainProxy = new FilterChainProxy(securityFilterChains);
    if (httpFirewall != null) {
@@ -623,6 +624,7 @@ protected Filter performBuild() throws Exception {
    }
     //回调初始化时加入的postBuildAction
    postBuildAction.run(
+       //	在build都完成后从http中拿出FilterSecurityInterceptor对象并赋值给WebSecurity
 				FilterSecurityInterceptor securityInterceptor = http
 						.getSharedObject(FilterSecurityInterceptor.class);
 				web.securityInterceptor(securityInterceptor);
@@ -631,17 +633,187 @@ protected Filter performBuild() throws Exception {
 }
 ```
 
-![1553680794115](images/Spring Security/1553680794115.png)
+4. `HttpSecurity#init()`回调传入过`HttpSecurity#apply()`的配置类的`init()`
 
-![1553681013386](images/Spring Security/1553681013386.png)
+   在用户代码`WebSecurityConfigurerAdapter#configure(HttpSecurity)`方法中(这个方法在本篇上下文中是在`WebSecurityConfigurerAdapter#getHttp()`中被调用的), 每个`HttpSecurity`的配置方法都会对new某一类配置的一个实例(如`CorsConfigurer`), **然后隐式调用`HttpSecurity#apply(Configurer)`**, 用户端对返回的进行一系列自定义配置(打开关闭, 设置允许的报头等等), 用户的自定义配置.
+
+   ```JAVA
+   public final class HttpSecurity {
+   	public CorsConfigurer<HttpSecurity> cors() throws Exception {
+           //new某一类配置的一个实例
+   		return getOrApply(new CorsConfigurer<>());
+   	}
+   
+   		private <C extends SecurityConfigurerAdapter<DefaultSecurityFilterChain,
+   														HttpSecurity>> C getOrApply(
+   			C configurer) throws Exception {
+   		C existingConfig = (C) getConfigurer(configurer.getClass());
+   		if (existingConfig != null) {
+   			return existingConfig;
+   		}
+           //隐式调用HttpSecurity#apply(Configurer)
+   		return apply(configurer);
+   	}
+   }
+   ```
+
+   
+
+5. `HttpSecurity#configure()`
+
+   同上, 回调传入过`HttpSecurity#apply()`的配置类的`configure(HttpSecurity)`
+
+   在每个`HttpConfigurer`的方法中都会调用`HttpSecurity#add(Filter)`, 将自己的过滤器加入到`HttpSecurity`中去
+
+6. `HttpSecurity#performBuild()`
+
+```JAVA
+	@Override
+	protected DefaultSecurityFilterChain HttpSecurity#performBuild() throws Exception {
+        //这些filters
+		//将filters排序, 之后加入链中返回
+        Collections.sort(filters, comparator);
+		return new DefaultSecurityFilterChain(requestMatcher, filters);
+	}	
+
+	public DefaultSecurityFilterChain(RequestMatcher requestMatcher, List<Filter> filters) {
+		logger.info("Creating filter chain: " + requestMatcher + ", " + filters);
+		this.requestMatcher = requestMatcher;
+		this.filters = new ArrayList<>(filters);
+	}
+```
 
 
 
+#### `AuthenticationManager`和`AuthenticationConfiguration`
+
+**这个类是对认证配置的默认配置, 提供了默认的`AuthenticationManager`(一个ProviderManager), 从下面`WebSecurityConfigurerAdapter`获取`AuthenticationManager`的源码中就可以看出相应逻辑: **
+
+- 如果用户覆盖了`WebSecurityConfigurerAdapter#configure(AuthenticationManagerBuilder)`自定义了一些认证配置, 就使用用户自定义过的`AuthenticationManagerBuilder`来构造`AuthenticationManager`
+- 否则, 会使用`AuthenticationConfiguration`提供的@Bean:`authenticationManagerBuilder()`来构造
+  - 如果容器中没有用户继承的`GlobalAuthenticationConfigurerAdapter`, 将提供默认配置
+  - 如果有, 将把这些配置应用到`AuthenticationConfiguration#authenticationManagerBuilder()`上
+
+思路回到:
+
+![1554005174964](images/Spring Security/1554005174964.png)
+
+```JAVA
+WebSecurity#init() -> WebSecurityConfigurerAdapter#getHttp() -> WebSecurityConfigurerAdapter#authenticationManager()
+```
+
+> Gets the AuthenticationManager to use.
+>
+>  **The default strategy is if `configure(AuthenticationManagerBuilder)` method is overridden to use the AuthenticationManagerBuilder that was passed in.** 
+>
+> Otherwise, autowire the AuthenticationManager by type.
+
+```JAVA
+protected AuthenticationManager authenticationManager() throws Exception {
+   if (!authenticationManagerInitialized) {
+       //调用configure(AuthenticationManagerBuilder auth)给用户自定义AuthenticationManager的机会
+       //默认操作为disableLocalConfigureAuthenticationBldr = true
+       //即, 不使用localConfigureAuthenticationBldr, 因为此时没有覆盖这个方法进行自定义配置
+       //从而下面的if将会执行AuthenticationConfiguration#getAuthenticationManager();
+      configure(localConfigureAuthenticationBldr);
+      if (disableLocalConfigureAuthenticationBldr) {
+          //关闭了localConfigureAuthenticationBldr
+          //调用AuthenticationConfiguration#getAuthenticationManager();
+          //见下面源码
+         authenticationManager = authenticationConfiguration
+               .getAuthenticationManager();
+      }
+      else {
+          //相反, 如果覆盖了configure(AuthenticationManagerBuilder auth)方法
+          //会走到else, 用自定义的authenticationManagerBuilder来build
+         authenticationManager = localConfigureAuthenticationBldr.build();
+      }
+      authenticationManagerInitialized = true;
+   }
+   return authenticationManager;
+}
+```
+
+```JAVA
+@Configuration
+@Import(ObjectPostProcessorConfiguration.class)
+public class AuthenticationConfiguration {
+    
+    public AuthenticationManager getAuthenticationManager() throws Exception {
+        //authenticationManager是否已经构建好, 如果是直接返回
+		if (this.authenticationManagerInitialized) {
+			return this.authenticationManager;
+		}
+            
+		AuthenticationManagerBuilder authBuilder = 
+            //直接调用@Bean方法来获取Bean
+            authenticationManagerBuilder(this.objectPostProcessor, this.applicationContext);
+        
+        //CAS操作来判断authBuilder是否已经应用过GlobalAuthenticationConfigurerAdapter
+		if (this.buildingAuthenticationManager.getAndSet(true)) {
+			return new AuthenticationManagerDelegator(authBuilder);
+		}
+
+        //从容器中拿出所有GlobalAuthenticationConfigurerAdapter, 应用到authBuilder上
+        //用户没有自定义的情况下, 
+		for (GlobalAuthenticationConfigurerAdapter config : globalAuthConfigurers) {
+			authBuilder.apply(config);
+		}
+        
+        //构建, 过程还是init configure performBuild
+		authenticationManager = authBuilder.build();
+
+        //默认返回的authenticationManager不为空, 不会执行if中的逻辑
+		if (authenticationManager == null) {
+			authenticationManager = getAuthenticationManagerBean();
+		}
+
+		this.authenticationManagerInitialized = true;
+		return authenticationManager;
+	}
+    
+	@Bean
+	public AuthenticationManagerBuilder authenticationManagerBuilder(
+			ObjectPostProcessor<Object> objectPostProcessor, ApplicationContext context) {
+		LazyPasswordEncoder defaultPasswordEncoder = new LazyPasswordEncoder(context);
+		AuthenticationEventPublisher authenticationEventPublisher = getBeanOrNull(context, AuthenticationEventPublisher.class);
+
+		DefaultPasswordEncoderAuthenticationManagerBuilder result = new DefaultPasswordEncoderAuthenticationManagerBuilder(objectPostProcessor, defaultPasswordEncoder);
+		if (authenticationEventPublisher != null) {
+			result.authenticationEventPublisher(authenticationEventPublisher);
+		}
+		return result;
+	}
+    
+    //下面是3个以@Bean方式给出的authenticationManagerBuilder默认配置
+ 	@Bean
+	public static GlobalAuthenticationConfigurerAdapter 
+        enableGlobalAuthenticationAutowiredConfigurer(
+			ApplicationContext context) {
+		return new EnableGlobalAuthenticationAutowiredConfigurer(context);
+	}
+
+	@Bean
+	public static InitializeUserDetailsBeanManagerConfigurer 
+        initializeUserDetailsBeanManagerConfigurer(ApplicationContext context) {
+		return new InitializeUserDetailsBeanManagerConfigurer(context);
+	}
+
+	@Bean
+	public static InitializeAuthenticationProviderBeanManagerConfigurer 
+        initializeAuthenticationProviderBeanManagerConfigurer(ApplicationContext context) {
+		return new InitializeAuthenticationProviderBeanManagerConfigurer(context);
+	}   
+}
+```
+
+用户没有自定义`GlobalAuthenticationConfigurerAdapter`的情况下, `AuthenticationConfiguration`提供的几个配置, 这些配置都是通过@Bean方法给出的:
+
+![1554020440664](images/Spring Security/1554020440664.png)
 
 
 
-
-
+# Spring Security Oauth2
 
 
 
