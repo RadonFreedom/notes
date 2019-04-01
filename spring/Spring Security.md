@@ -1,4 +1,4 @@
-# Spring Security
+# Spring Security 原理
 
 ## Spring Security 核心组件
 
@@ -813,11 +813,43 @@ public class AuthenticationConfiguration {
 
 
 
-# Spring Security Oauth2
+# Spring Security 功能
+
+- 认证 authentication
+- 授权 authorization
+- 防护 security
+
+
+
+# 简单的 SSO
+
+用户登录的关键接口:
+
+- `UserDetails UserDetailsService#loadUserByUsername(String username)`: Spring Security 提供的获取用户认证所需信息的Service接口, 返回的`UserDetails`当然就是对应username的用户认证信息
+
+- ![1554103611115](images/Spring Security/1554103611115.png)
+
+  `UserDetails`接口保存了用户认证需要的所有认证信息, 需要实现类, 提供的默认实现类是`User`
+
+- `PasswordEncoder`接口提供了密码的加密(encode), 比对(matches)功能. 
+
+  ![1554103778916](images/Spring Security/1554103778916.png)
+
+  应该知道的是, 保存在数据库中的密码都是经过加密之后的, 使用当时对密码进行加密的`PasswordEncoder`来比对用户登录密码和之前在数据库中保存的密码就可以完成比对.
+
+用户登录的过程, 用调用栈来表示:
+
+ 
+
+
+
+# Oauth2 JWT
 
 
 
 
+
+# Oauth2 SSO
 
 
 
