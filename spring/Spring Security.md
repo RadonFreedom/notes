@@ -2,8 +2,6 @@
 
 ## Spring Security 核心组件
 
-Spring Security 有五个核心组件：SecurityContext、SecurityContextHolder、Authentication、Userdetails 和 AuthenticationManager。下面分别介绍一下各个组件。
-
 ### SecurityContext
 
 SecurityContext 即安全上下文，关联当前用户的安全信息。用户通过 Spring Security 的校验之后，SecurityContext 会存储验证信息，下文提到的 Authentication 对象包含当前用户的身份信息。SecurityContext 的接口签名如清单 1 所示:
@@ -103,30 +101,11 @@ AuthenticationManager 可以将异常抛出的更加明确：
 - 当用户被锁定时抛出 `LockedException`。
 - 当用户密码错误时抛出 `BadCredentialsException`。
 
-重新注入的 Authentication 会包含当前用户的详细信息，并且被填充到 SecurityContext 中，这样 Spring Security 的验证流程就完成了，Spring Security 可以识别到 "你是谁"。
+重新注入的 Authentication 会包含当前用户的详细信息，并且被填充到 SecurityContext 中，这样 Spring Security 的验证流程就完成了，Spring Security 可以识别到 "你是谁"
 
-### 基本校验流程示例
 
-下面采用 Spring Security 的核心组件写一个最基本的用户名密码校验示例，如清单 5 所示:
 
-##### 清单 5. Spring Security 核心组件伪代码
-
-```JAVA
-AuthenticationManager amanager = new CustomAuthenticationManager();
-Authentication namePwd = new CustomAuthentication(“name”, “password”);
-try {
-       Authentication result = amanager.authenticate(namePwd);
-       SecurityContextHolder.getContext.setAuthentication(result);
-} catch(AuthenticationException e) {
-       // TODO 验证失败
-}
-```
-
-Spring Security 的核心组件易于理解，其基本校验流程是: 验证信息传递过来，验证通过，将验证信息存储到 SecurityContext 中；验证失败，做出相应的处理。
-
-## Spring Security 在 Web 中的核心组件
-
-#### FilterChainProxy
+### FilterChainProxy
 
 FilterChaniProxy 是 FilterChain 代理。
 
@@ -140,7 +119,7 @@ FilterChain 维护了一个 Filter 队列，这些 Filter 为 Spring Security �
 - 另一方面 Spring MVC 通过 Servlet 做请求转发，如果 Spring Security 采用 Servlet，那么 Spring Security 和 Spring MVC 的集成会存在问题。
 - FilterChain 维护了很多 Filter，每个 Filter 都有自己的功能，因此在 Spring Security 中添加新功能时，推荐通过 Filter 的方式来实现。
 
-#### ProviderManager
+### ProviderManager
 
 **ProviderManager 是 AuthenticationManager 的实现类。**
 
@@ -172,7 +151,7 @@ public Authentication authenticate(Authentication authentication)
 
 ProviderManager 维护了一个 AuthenticationProvider 队列。当 Authentication 传递进来时，ProviderManager 通过 supports 函数查找支持校验的 AuthenticationProvider。如果没有找到支持的 AuthenticationProvider 将抛出`ProviderNotFoundException` 异常。
 
-#### AuthenticationProvider
+### AuthenticationProvider
 
 AuthenticationProvider 是在 Web 环境中真正对 Authentication 进行校验的组件。其接口签名如清单 8 所示:
 
@@ -192,7 +171,7 @@ public interface AuthenticationProvider {
 
 
 
-## 核心组件的源码分析
+## 源码分析
 
 ### `@EnableWebSecurity`: 从配置到过滤器链springSecurityFilterChain
 
@@ -813,17 +792,38 @@ public class AuthenticationConfiguration {
 
 
 
-# Spring Security 功能
-
-- 认证 authentication
-- 授权 authorization
-- 防护 security
+### TODO 拦截器链的执行流程
 
 
 
-# 简单的 SSO
+### TODO Oauth2组件与`@EnableAuthorizationServer`
 
-用户登录的关键接口:
+
+
+### Oauth2的执行流程
+
+
+
+# Spring Security 功能与实践
+
+Spring Security 提供的功能
+
+- 认证 (authentication)
+- 授权 (authorization)
+- Oauth2模块
+
+实践:
+
+- 利用`@EnableWebSecurity`实现简单的SSO, 使用了认证和授权功能.
+- 利用`@EnableAuthorizationServer`和`@EnableOAuth2Client`实现前端和微服务, 微服务们之间的Oauth2认证.
+
+
+
+## 简单的SSO
+
+具体配置和README请参见[spr-security项目的sso分支](https://github.com/RadonFreedom/spr-security/branches).
+
+用户认证相关的关键接口:
 
 - `UserDetails UserDetailsService#loadUserByUsername(String username)`: Spring Security 提供的获取用户认证所需信息的Service接口, 返回的`UserDetails`当然就是对应username的用户认证信息
 
@@ -837,33 +837,296 @@ public class AuthenticationConfiguration {
 
   应该知道的是, 保存在数据库中的密码都是经过加密之后的, 使用当时对密码进行加密的`PasswordEncoder`来比对用户登录密码和之前在数据库中保存的密码就可以完成比对.
 
-用户登录的过程, 用调用栈来表示:
-
- 
 
 
+## OAUTH2初步实践
 
-# Oauth2 JWT
+**三种模式的模型和流程请参考 [RFC6749](https://tools.ietf.org/html/rfc6749#section-4.1).**
 
+三种模式的应用场景:
 
+- 授权码模式 (Authorization Code Grant): 三方应用调用本方API获取后台资源.
 
+  流程复杂, 不仅需要用户认证, 还需要客户端提供 `client_id` 和 `client_secret` .
 
+- 用户密码模式 (Resource Owner Password Credentials Grant): 本方前端UI获取后台资源.
 
-# Oauth2 SSO
+  仅需要用户认证即可获取 `token`.
 
+- 客户端认证模式 (Client Credentials Grant): 后端微服务之间REST API相互调用获取资源.
 
-
-
-
-
-
-
+  仅需要客户端提供 `client_id` 和 `client_secret` 即可完成认证, 获取`token`.
 
 
 
+先来从`@EnableAuthorizationServer`Java doc看看: 
+
+> Convenience annotation for enabling an Authorization Server (i.e. an AuthorizationEndpoint and a TokenEndpoint) in the current application context, which must be a DispatcherServlet context. Many features of the server can be customized using @Beans of type AuthorizationServerConfigurer (e.g. by extending AuthorizationServerConfigurerAdapter). 
+>
+> **The user is responsible for securing the Authorization Endpoint (/oauth/authorize) using normal Spring Security features (@EnableWebSecurity etc.)**, 
+>
+> but **the Token Endpoint (/oauth/token) will be automatically secured using HTTP Basic authentication on the client's credentials.** 
+>
+> **Clients must be registered by providing a ClientDetailsService through one or more AuthorizationServerConfigurers.**
+
+从上面可以看出来的有:
+
+1. 使用`@EnableWebSecurity`为oauth2的`/oauth/authorize`端点提供基本认证保护, 客户端如果想访问`/oauth/authorize`需要先进行基本的安全认证 (这个节点正是授权码模式的模型中获得授权码的节点).
+2. 利用`ClientDetailsService`来注册oauth2的客户端信息.
+3. 从`/oauth/token`端点获取token, 这个端点默认要进行客户端身份认证, 但没有用户身份认证.
 
 
 
+### 授权码模式
+
+#### 配置代码
+
+```JAVA
+@EnableAuthorizationServer
+@Configuration
+public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
+	public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
+        // @formatter:off
+        clients.inMemory()
+                .withClient("client")
+                .secret("radon")
+                //设置授权类型
+                .authorizedGrantTypes( "authorization_code", "refresh_token")
+                /*
+                在Spring Security的授权码模式下
+                oauth2服务器必须显式地配置redirect_uri
+                oauth2客户端必须在请求中提供redirect_uri
+                这是和参考模型不同之处
+                 */
+                .redirectUris("/redirect")
+                .scopes("client")
+    }
+}
+```
+
+```JAVA
+//为oauth2授权码模式的/oauth/authorize节点提供基本用户认证
+@EnableWebSecurity(debug = true)
+@Configuration
+public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new PasswordEncoder() {
+            @Override
+            public String encode(CharSequence rawPassword) {
+                return rawPassword.toString();
+            }
+
+            @Override
+            public boolean matches(CharSequence rawPassword, String encodedPassword) {
+
+                return encodedPassword != null && encodedPassword.equals(rawPassword.toString());
+            }
+        };
+    }
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+                .authorizeRequests()
+                .anyRequest()
+                .authenticated()
+
+                .and()
+                //当未授权用户对被保护节点/oauth/authorize进行访问, 将被导向认证页面
+                .formLogin()
+                .permitAll()
+
+                .and()
+                .csrf().disable();
+    }
+}
+```
+
+#### 流程
+
+**Role Play:**
+
+- 第三方客户端: 浏览器
+- 用户: 你
+- 认证服务器: 启动后的Spring Boot项目
+
+
+
+**访问流程如下**: 
+
+1. 在浏览器中按照`Oauth2Config`中对 `client` 这个客户端的配置**访问服务器的授权endpoint: `/oauth/authorize`**.
+
+   ```
+   localhost:8080/oauth/authorize?client_id=client&response_type=code&redirect_uri=/redirect&scope=client
+   ```
+
+   跳转到配置的用户认证页面进行用户认证
+
+   ![1554261809205](../../dev/spr-security/images/README/1554261809205.png)
+
+   校验通过, 重定向到授权URL, 引导用户授权
+
+   ![1554261201356](../../dev/spr-security/images/README/1554261201356.png)
+
+   
+
+2. 用户授权后, 客户端将被重定向到**客户端和服务器双方约定**的`redirect_uri`, 并将服务器提供的授权码`code`作为请求的参数
+
+   ![1554261629076](../../dev/spr-security/images/README/1554261629076.png)
+
+   方便起见, 我简单跳转到了本站下的`/redirect` 路径, 并返回了授权码, 如下所示:
+
+   ```JAVA
+   @RestController
+   public class AuthorizationCodeController {
+       @RequestMapping("/redirect")
+       public String redirect(@RequestParam("code") String authorizationCode) {
+           return authorizationCode;
+       }
+   }
+   ```
+
+   
+
+3. 客户端需要使用这个code访问服务器的token获取endpoint: `/oauth/token`
+
+   ```
+   localhost:8080/oauth/token?grant_type=authorization_code&client_id=client&redirect_uri=/redirect&scope=client&code=${替换成授权码}
+   ```
+
+   注意, 为了能够用GET方法访问`/oauth/token`节点, 需要进行如下配置, 不然默认只能用POST: 
+
+   ```JAVA
+       @Override
+       public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+   
+           endpoints
+                   .allowedTokenEndpointRequestMethods(HttpMethod.GET, HttpMethod.POST);
+       }
+   ```
+
+   
+
+   服务器通过`client_id`和`client_secret`进行客户端认证(client credentials).
+
+4. 客户端认证成功后返回最终结果
+
+   ![1554263074366](../../dev/spr-security/images/README/1554263074366.png)
+
+   注意, 因为我们在配置`client`客户端时设置的授权类型包含了`refresh_token`, 因此在返回的结果中也包含了这个东西. 它是用来刷新`access_token`的.
+
+   
+
+5. **流程中应该有但是没涉及到的一些步骤是:** 
+
+   - 授权服务器在生成token后对token的存储(默认是存在内存中).
+   - 客户端拿着得到的token访问资源服务器.
+   - 资源服务器向授权服务器进行token验证.
+
+
+
+### 用户密码模式
+
+#### 配置代码
+
+注意: 
+
+- 因为`/oauth/token`默认没有涉及到用户认证, 所以需要给`AuthorizationServerEndpointsConfigurer`提供`authenticationManager`, 保证`/oauth/token`这个端点有用户认证功能.
+- 在授权码模式中没有讨论token认证的问题, 其实可以利用`/oauth/check_token`这个endpoint来进行token校验
+
+```JAVA
+@EnableAuthorizationServer
+@Configuration
+public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
+    
+    @Override
+    public void configure(AuthorizationServerSecurityConfigurer oauthServer) throws Exception {
+        oauthServer
+                //url:/oauth/check_token allow check token
+                .checkTokenAccess("isAuthenticated()")
+                .allowFormAuthenticationForClients();
+    }
+    
+   	@Override
+	public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
+        // @formatter:off
+        clients.inMemory()
+                .withClient("ui")
+                .authorizedGrantTypes( "password", "refresh_token")
+                .scopes("ui")
+    }
+    
+    @Override
+    public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+
+        endpoints
+                .allowedTokenEndpointRequestMethods(HttpMethod.GET, HttpMethod.POST)
+                //注入authenticationManager来支持 password grant type
+                .authenticationManager(authenticationManager);
+
+    }
+}
+```
+
+
+
+#### 访问流程
+
+1. 根据模型中所需请求参数访问下面的URL:
+
+   ![1554264536006](../../dev/spr-security/images/README/1554264536006.png)
+
+   ![1554266353216](../../dev/spr-security/images/README/1554266353216.png)
+
+2. 模拟资源服务器向授权服务器发出请求, 进行token校验
+
+   ![1554266321420](../../dev/spr-security/images/README/1554266321420.png)
+
+
+
+### 客户端认证模式
+
+#### 配置代码
+
+```JAVA
+@EnableAuthorizationServer
+@Configuration
+public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
+    
+    @Override
+    public void configure(AuthorizationServerSecurityConfigurer oauthServer) throws Exception {
+        oauthServer
+                //url:/oauth/check_token allow check token
+                .checkTokenAccess("isAuthenticated()");
+    }
+    
+   	@Override
+	public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
+        clients.inMemory()
+                .withClient("account-service")
+                .secret(ACCOUNT_SERVICE_PASSWORD)
+                .authorizedGrantTypes("client_credentials", "refresh_token")
+                .scopes("server");
+    }
+}
+```
+
+
+
+#### 访问流程
+
+![1554279157249](images/Spring Security/1554279157249.png)
+
+
+
+## 搭建资源服务器
+
+为了去繁就简, 使用`RestTemplate`来负责微服务之间的沟通.
 
 
 

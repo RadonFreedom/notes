@@ -1,22 +1,30 @@
 # 微服务中一些重要概念
 
-## RPC
+#### RPC
 
-## API 网关
+Dubbo. 在Spring Cloud中是Feign.
+
+**API 网关**
 
 > It is a single entry point into the system, used to handle requests by routing them to the appropriate backend service or by invoking multiple backend services and [aggregating the results](http://techblog.netflix.com/2013/01/optimizing-netflix-api.html). Also, it can be used for authentication, insights, stress and canary testing, service migration, static response handling, active traffic management.
 
 [API 网关性能比较：NGINX vs. ZUUL vs. Spring Cloud Gateway vs. Linkerd](https://infoq.cn/article/comparing-api-gateway-performances)
 
-## 服务自动注册和发现
+#### 服务自动注册和发现
 
-## 本地负载均衡（服务之间沟通）  
+Zookeeper, 在SpringCloud中是eureka
 
-## 客户端负载均衡（客户端与服务沟通）
+#### 本地负载均衡 (服务之间沟通)
 
-## 智能容错，熔断机制
+在SpringCloud中是ribbon
 
-[看看这篇漫画8](http://www.10tiao.com/html/332/201803/2652434519/1.html)
+#### 客户端负载均衡 (客户端与服务沟通)
+
+Nginx, zuul
+
+#### 智能容错，熔断机制
+
+Netflix Hystrix
 
 
 
@@ -81,13 +89,13 @@ Spring Cloud由众多子项目组成，如Spring Cloud Config、Spring Cloud Net
 
 最后，技术选型是一个综合的问题，需要考虑团队的情况、业务的发展以及公司的产品特征。最炫最酷的技术并不一定是最好的，选择适合自己团队、符合公司业务的框架才是最佳方案。
 
-# Spring Cloud笔记
+
 
 ![img](images/Spring Cloud/435188-20180412214045427-176081083.png)
 
 
 
-## 注册中心 EUREKA
+# 注册中心 EUREKA
 
 
 
