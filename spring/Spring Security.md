@@ -802,6 +802,293 @@ public class AuthenticationConfiguration {
 
 ### Oauth2的执行流程
 
+#### `ClientDetailsService`
+
+这个接口和`UserDetailsService`类似, 只不过返回的是oauth2客户端信息`ClientDetails`.
+
+`ClientDetailsService`可以在配置中被指定, 生成什么样的`ClientDetails`.
+
+```JAVA
+//A service that provides the details about an OAuth2 client.
+public interface ClientDetailsService {
+  ClientDetails loadClientByClientId(String clientId) throws ClientRegistrationException;
+}
+```
+
+#### `TokenEndpoint`
+
+```JAVA
+@FrameworkEndpoint
+public class TokenEndpoint extends AbstractEndpoint {
+    @RequestMapping(value = "/oauth/token", method=RequestMethod.GET)
+	public ResponseEntity<OAuth2AccessToken> getAccessToken(Principal principal, @RequestParam
+	Map<String, String> parameters) throws HttpRequestMethodNotSupportedException {
+		if (!allowedRequestMethods.contains(HttpMethod.GET)) {
+			throw new HttpRequestMethodNotSupportedException("GET");
+		}
+		return postAccessToken(principal, parameters);
+	}
+    
+	@RequestMapping(value = "/oauth/token", method=RequestMethod.POST)
+	public ResponseEntity<OAuth2AccessToken> postAccessToken(Principal principal, @RequestParam
+	Map<String, String> parameters) throws HttpRequestMethodNotSupportedException {
+
+		if (!(principal instanceof Authentication)) {
+			throw new InsufficientAuthenticationException(
+					"There is no client authentication. 
+                Try adding an appropriate authentication filter.");
+		}
+
+		String clientId = getClientId(principal);
+		ClientDetails authenticatedClient = 
+            getClientDetailsService().loadClientByClientId(clientId);
+
+        		//根据ClientDetails和parameters来创建一个token请求
+                //下面少不了对tokenRequest中的请求参数和authenticatedClient的信息匹配过程
+		TokenRequest tokenRequest = 
+            getOAuth2RequestFactory().createTokenRequest(parameters, authenticatedClient);
+
+		if (clientId != null && !clientId.equals("")) {
+			// Only validate the client details if a client authenticated during this
+			// request.
+			if (!clientId.equals(tokenRequest.getClientId())) {
+				// double check to make sure that the client ID
+                //in the token request is the same as that in the
+				// authenticated client
+				throw new InvalidClientException
+                    ("Given client ID does not match authenticated client");
+			}
+		}
+		if (authenticatedClient != null) {
+			oAuth2RequestValidator.validateScope(tokenRequest, authenticatedClient);
+		}
+		if (!StringUtils.hasText(tokenRequest.getGrantType())) {
+			throw new InvalidRequestException("Missing grant type");
+		}
+		if (tokenRequest.getGrantType().equals("implicit")) {
+			throw new InvalidGrantException
+                ("Implicit grant type not supported from token endpoint");
+		}
+
+      
+		if (isAuthCodeRequest(parameters)) {
+			// The scope was requested or determined during the authorization step
+            //所以在这里把它设置成空, 到下面设置成authorization时设定的scope
+			if (!tokenRequest.getScope().isEmpty()) {
+				logger.debug("Clearing scope of incoming token request");
+				tokenRequest.setScope(Collections.<String> emptySet());
+			}
+		}
+
+		if (isRefreshTokenRequest(parameters)) {
+			// A refresh token has its own default scopes,
+            //so we should ignore any added by the factory here.
+         	tokenRequest.
+                setScope(OAuth2Utils.parseParameterList(parameters.get(OAuth2Utils.SCOPE)));
+		}
+
+                //代理给CompositeTokenGranter来生成token
+		OAuth2AccessToken token = getTokenGranter().grant(tokenRequest.getGrantType(), 
+                                                          tokenRequest);
+		if (token == null) {
+			throw new UnsupportedGrantTypeException("Unsupported grant type: " + 
+                                                    tokenRequest.getGrantType());
+		}
+
+		return getResponse(token);
+
+	}
+}
+```
+
+#### `TokenGranter`
+
+```JAVA
+public class CompositeTokenGranter implements TokenGranter {
+
+    //集合中包含了对五种类型的TokenGranter的实现, 见下图
+   private final List<TokenGranter> tokenGranters;
+
+   public CompositeTokenGranter(List<TokenGranter> tokenGranters) {
+      this.tokenGranters = new ArrayList<TokenGranter>(tokenGranters);
+   }
+   
+   public OAuth2AccessToken grant(String grantType, TokenRequest tokenRequest) {
+      for (TokenGranter granter : tokenGranters) {
+         OAuth2AccessToken grant = granter.grant(grantType, tokenRequest);
+         if (grant!=null) {
+            return grant;
+         }
+      }
+      return null;
+   }
+   
+   public void addTokenGranter(TokenGranter tokenGranter) {
+      if (tokenGranter == null) {
+         throw new IllegalArgumentException("Token granter is null");
+      }
+      tokenGranters.add(tokenGranter);
+   }
+
+}
+```
+
+![1554292547792](images/Spring Security/1554292547792.png)
+
+
+
+```JAVA
+class AbstractTokenGranter {
+	protected OAuth2AccessToken getAccessToken(ClientDetails client, TokenRequest tokenRequest) {
+		//最后都在父类AbstractTokenGranter中代理给AuthorizationServerTokenServices来创建token
+        //五个类只有getOAuth2Authentication()方法的实现不同
+        //而用户密码模式下的用户认证恰在getOAuth2Authentication()方法中
+        return tokenServices.createAccessToken(getOAuth2Authentication(client, tokenRequest));
+	}
+}
+```
+
+举例来看`getOAuth2Authentication`方法:
+
+```java
+public class ResourceOwnerPasswordTokenGranter{
+@Override
+protected OAuth2Authentication getOAuth2Authentication(ClientDetails client, TokenRequest tokenRequest) {
+
+   Map<String, String> parameters = new LinkedHashMap<String, String>(tokenRequest.getRequestParameters());
+   String username = parameters.get("username");
+   String password = parameters.get("password");
+   // Protect from downstream leaks of password
+   parameters.remove("password");
+
+   Authentication userAuth = new UsernamePasswordAuthenticationToken(username, password);
+   ((AbstractAuthenticationToken) userAuth).setDetails(parameters);
+   try {
+       //用户认证
+      userAuth = authenticationManager.authenticate(userAuth);
+   }
+   catch (AccountStatusException ase) {
+      //covers expired, locked, disabled cases (mentioned in section 5.2, draft 31)
+      throw new InvalidGrantException(ase.getMessage());
+   }
+   catch (BadCredentialsException e) {
+      // If the username/password are wrong the spec says we should send 400/invalid grant
+      throw new InvalidGrantException(e.getMessage());
+   }
+   if (userAuth == null || !userAuth.isAuthenticated()) {
+      throw new InvalidGrantException("Could not authenticate user: " + username);
+   }
+   
+   OAuth2Request storedOAuth2Request = getRequestFactory().createOAuth2Request(client, tokenRequest);    
+   return new OAuth2Authentication(storedOAuth2Request, userAuth);
+}
+}
+```
+
+#### `AuthorizationServerTokenServices`
+
+```JAVA
+public interface AuthorizationServerTokenServices {
+    //Create an access token associated with the specified credentials.
+	OAuth2AccessToken createAccessToken(OAuth2Authentication authentication);
+    
+    /*
+    Refresh an access token. 
+    The authorization request should be used for 2 things (at least): 
+    to validate that the client id of the original access token is the same as
+    the one requesting the refresh, and to narrow the scopes (if provided).
+    */
+    OAuth2AccessToken refreshAccessToken(String refreshToken, TokenRequest tokenRequest);
+    
+    //Retrieve an access token stored against the provided authentication key, if it exists.
+    OAuth2AccessToken getAccessToken(OAuth2Authentication authentication);
+}
+```
+
+`DefaultTokenServices`中的默认实现如下: 
+
+```JAVA
+	@Transactional
+	public OAuth2AccessToken createAccessToken(OAuth2Authentication authentication)
+        throws AuthenticationException {
+
+        //先从tokenStore中拿到之前保存的令牌, 看看是否过期
+		OAuth2AccessToken existingAccessToken = tokenStore.getAccessToken(authentication);
+		OAuth2RefreshToken refreshToken = null;
+		if (existingAccessToken != null) {
+			if (existingAccessToken.isExpired()) {
+				if (existingAccessToken.getRefreshToken() != null) {
+					refreshToken = existingAccessToken.getRefreshToken();
+					// The token store could remove the refresh token when the
+					// access token is removed, but we want to
+					// be sure...
+					tokenStore.removeRefreshToken(refreshToken);
+				}
+				tokenStore.removeAccessToken(existingAccessToken);
+			}
+			else {
+                //没有过期, 重新存一次授权信息, 但过期时间不变
+				// Re-store the access token in case the authentication has changed
+				tokenStore.storeAccessToken(existingAccessToken, authentication);
+				return existingAccessToken;
+			}
+		}
+
+		// Only create a new refresh token if there wasn't an existing one
+		// associated with an expired access token.
+		// Clients might be holding existing refresh tokens, so we re-use it in
+		// the case that the old access token
+		// expired.
+		if (refreshToken == null) {
+			refreshToken = createRefreshToken(authentication);
+		}
+		// But the refresh token itself might need to be re-issued if it has
+		// expired.
+		else if (refreshToken instanceof ExpiringOAuth2RefreshToken) {
+			ExpiringOAuth2RefreshToken expiring = (ExpiringOAuth2RefreshToken) refreshToken;
+			if (System.currentTimeMillis() > expiring.getExpiration().getTime()) {
+				refreshToken = createRefreshToken(authentication);
+			}
+		}
+
+		OAuth2AccessToken accessToken = createAccessToken(authentication, refreshToken);
+		tokenStore.storeAccessToken(accessToken, authentication);
+		// In case it was modified
+		refreshToken = accessToken.getRefreshToken();
+		if (refreshToken != null) {
+			tokenStore.storeRefreshToken(refreshToken, authentication);
+		}
+		return accessToken;
+
+	}
+```
+
+
+
+#### `OAuth2Authentication`
+
+> An OAuth 2 authentication token can **contain two authentications: one for the client and one for the user**. Since some OAuth authorization grants don't require user authentication, the user authentication may be null.
+
+源码中显而易见:
+
+```JAVA
+public class OAuth2Authentication extends AbstractAuthenticationToken {
+
+	private final OAuth2Request storedRequest;
+
+	private final Authentication userAuthentication;
+
+}
+```
+
+OAuth2Request:
+
+> **Represents a stored authorization or token request. Used as part of the OAuth2Authentication object to store a request's authentication information.** 
+>
+> Does not expose public setters so that clients can not mutate state if they respect the declared type of the request.
+
+
+
 
 
 # Spring Security 功能与实践
@@ -841,23 +1128,27 @@ Spring Security 提供的功能
 
 ## OAUTH2初步实践
 
+### 前言
+
+#### OAUTH2模型及其应用场景
+
 **三种模式的模型和流程请参考 [RFC6749](https://tools.ietf.org/html/rfc6749#section-4.1).**
 
 三种模式的应用场景:
 
 - 授权码模式 (Authorization Code Grant): 三方应用调用本方API获取后台资源.
 
-  流程复杂, 不仅需要用户认证, 还需要客户端提供 `client_id` 和 `client_secret` .
+  流程复杂, 不仅需要用户认证, 还需要客户端认证(`client_id` 和 `client_secret` ).
 
 - 用户密码模式 (Resource Owner Password Credentials Grant): 本方前端UI获取后台资源.
 
-  仅需要用户认证即可获取 `token`.
+  需要用户认证, 还需要客户端认证, 不过省去了授权码.
 
 - 客户端认证模式 (Client Credentials Grant): 后端微服务之间REST API相互调用获取资源.
 
-  仅需要客户端提供 `client_id` 和 `client_secret` 即可完成认证, 获取`token`.
+  仅需要需要客户端认证, 即可获取`token`.
 
-
+#### `@EnableAuthorizationServer`
 
 先来从`@EnableAuthorizationServer`Java doc看看: 
 
@@ -965,17 +1256,17 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
    跳转到配置的用户认证页面进行用户认证
 
-   ![1554261809205](../../dev/spr-security/images/README/1554261809205.png)
+   ![1554261809205](images/Spring Security/1554261809205.png)
 
    校验通过, 重定向到授权URL, 引导用户授权
 
-   ![1554261201356](../../dev/spr-security/images/README/1554261201356.png)
+   ![1554261201356](images/Spring Security/1554261201356.png)
 
    
 
 2. 用户授权后, 客户端将被重定向到**客户端和服务器双方约定**的`redirect_uri`, 并将服务器提供的授权码`code`作为请求的参数
 
-   ![1554261629076](../../dev/spr-security/images/README/1554261629076.png)
+   ![1554261629076](images/Spring Security/1554261629076.png)
 
    方便起见, 我简单跳转到了本站下的`/redirect` 路径, 并返回了授权码, 如下所示:
 
@@ -1014,7 +1305,7 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
 4. 客户端认证成功后返回最终结果
 
-   ![1554263074366](../../dev/spr-security/images/README/1554263074366.png)
+   ![1554263074366](images/Spring Security/1554263074366.png)
 
    注意, 因为我们在配置`client`客户端时设置的授权类型包含了`refresh_token`, 因此在返回的结果中也包含了这个东西. 它是用来刷新`access_token`的.
 
@@ -1078,13 +1369,13 @@ public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
 
 1. 根据模型中所需请求参数访问下面的URL:
 
-   ![1554264536006](../../dev/spr-security/images/README/1554264536006.png)
+   ![1554264536006](images/Spring Security/1554264536006.png)
 
-   ![1554266353216](../../dev/spr-security/images/README/1554266353216.png)
+   ![1554291045426](images/Spring Security/1554291045426.png)
 
 2. 模拟资源服务器向授权服务器发出请求, 进行token校验
 
-   ![1554266321420](../../dev/spr-security/images/README/1554266321420.png)
+   ![1554266321420](images/Spring Security/1554266321420.png)
 
 
 
@@ -1124,9 +1415,334 @@ public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
 
 
 
-## 搭建资源服务器
-
-为了去繁就简, 使用`RestTemplate`来负责微服务之间的沟通.
 
 
+## 使用yml自定义Oauth2客户端配置
+
+**为了能够方便配置客户端认证信息, 实现配置信息和java代码解耦, 打算从yml配置中装载 Oauth2 认证服务器对客户端认证信息的配置.**
+
+**我写的`Oauth2ServerClientsProperties`, 用来装载在yml中配置的客户端认证信息.**
+
+```JAVA
+@ConfigurationProperties(prefix = "security.oauth2.server")
+public class Oauth2ServerClientsProperties {
+
+    private Map<String, Oauth2ClientProperties> clients = new LinkedHashMap<>();
+
+    public Map<String, Oauth2ClientProperties> getClients() {
+        return clients;
+    }
+
+    public void setClients(Map<String, Oauth2ClientProperties> clients) {
+        this.clients = clients;
+    }
+
+    public static class Oauth2ClientProperties {
+
+        private String clientId;
+
+        private String[] authorizedGrantTypes = {};
+
+        private String[] authorities = {};
+
+        private Integer accessTokenValiditySeconds;
+
+        private Integer refreshTokenValiditySeconds;
+
+        private String[] scopes = {};
+
+        private String[] autoApproveScopes = {};
+
+        private String secret;
+
+        private String[] redirectUris = {};
+
+        private String[] resourceIds = {};
+
+        private boolean autoApprove;
+
+        //getter&setter省略
+    }
+}
+
+```
+
+**对应的yml配置也可以当做以后的范本**:
+
+```YML
+security:
+  oauth2:
+    server:
+      clients:
+        client:
+          client-id: client
+          secret: radon
+          authorized-grant-types:
+            - authorization_code
+            - refresh_token
+          redirectUris: /redirect
+          scopes: client
+
+        web:
+          client-id: web
+          secret: radon
+          authorized-grant-types:
+            - password
+            - refresh_token
+          scopes: ui
+
+        account-service:
+          client-id: account-service
+          secret: radon
+          authorized-grant-types:
+            - client_credentials
+            - refresh_token
+          scopes: server
+
+```
+
+**最后是取出值并传入原配置方式之中**:
+
+```JAVA
+@EnableAuthorizationServer
+//引入装载的配置
+@EnableConfigurationProperties(Oauth2ServerClientsProperties.class)
+@Configuration
+public class Oauth2ServerConfig extends AuthorizationServerConfigurerAdapter {
+    
+        @Override
+    public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
+        //基于YML配置, 请在配置文件中添加相关配置
+        InMemoryClientDetailsServiceBuilder inMemoryClientDetailsServiceBuilder = 
+            clients.inMemory();
+
+        //取出clients中的值并一一配置, Oauth2ClientProperties和官方的ClientBuilder是对应关系
+        for (Oauth2ServerClientsProperties.Oauth2ClientProperties client : 
+             oauth2ServerClientsProperties.getClients().values()) {
+            ClientDetailsServiceBuilder.ClientBuilder builder = 
+                inMemoryClientDetailsServiceBuilder
+                //withClient会new一个ClientBuilder返回
+                    .withClient(client.getClientId())
+                    .authorizedGrantTypes(client.getAuthorizedGrantTypes())
+                    .authorities(client.getAuthorities())
+                    .scopes(client.getScopes())
+                    .autoApprove(client.getAutoApproveScopes())
+                    .autoApprove(client.isAutoApprove())
+                    .secret(client.getSecret())
+                    .redirectUris(client.getRedirectUris())
+                    .resourceIds(client.getResourceIds());
+
+            //由于配置方法的参数是原始类型, 必须进行非空校验再传入
+            if (client.getAccessTokenValiditySeconds() != null) {
+                builder.accessTokenValiditySeconds(client.getAccessTokenValiditySeconds());
+            }
+            if (client.getAccessTokenValiditySeconds() != null) {
+                builder.refreshTokenValiditySeconds(client.getRefreshTokenValiditySeconds());
+            }
+        }
+    }
+}
+```
+
+
+
+## REDIS用于token存储
+
+如果token存储在服务的JVM进程内存中, 一旦这个服务崩溃, token信息将全部丢失.
+
+为了避免这种情况的发生, 尝试使用redis进行token存储
+
+#### 使用DOCKER 开启 REDIS
+
+```
+> docker run --name myredis -p6379:6379 redis &
+```
+
+#### 配置token存储, 使用`RedisTokenStore`
+
+```JAVA
+@EnableAuthorizationServer
+@EnableConfigurationProperties(Oauth2ServerClientsProperties.class)
+@Configuration
+public class Oauth2ServerConfig extends AuthorizationServerConfigurerAdapter {
+
+
+    private final AuthenticationManager authenticationManager;
+    private final Oauth2ServerClientsProperties oauth2ServerClientsProperties;
+    private final RedisTokenStore redisTokenStore;
+
+    @Override
+    public void configure(AuthorizationServerEndpointsConfigurer endpoints) {
+
+        endpoints
+                .allowedTokenEndpointRequestMethods(HttpMethod.GET, HttpMethod.POST)
+            	//使用REDIS存储token
+                .tokenStore(redisTokenStore)
+                //注入authenticationManager来支持 password grant type
+                .authenticationManager(authenticationManager);
+    }
+
+    @Bean
+    @Autowired
+    public RedisTokenStore redisTokenStore (RedisConnectionFactory redisConnectionFactory) {
+        return new RedisTokenStore(redisConnectionFactory);
+    }
+}
+```
+
+存储结果:
+
+```
+radon@boat:~/Desktop/dev/spr-security$ docker exec -it myredis redis-cli
+127.0.0.1:6379> ping
+PONG
+
+127.0.0.1:6379> keys *
+(empty list or set)
+
+127.0.0.1:6379> keys *
+1) "client_id_to_access:web"
+2) "access:6b9334ff-32fb-4fa7-a159-10418684db90"
+3) "auth:6b9334ff-32fb-4fa7-a159-10418684db90"
+4) "refresh_to_access:d1936aa5-5887-43ae-81f5-8f79c9142cfa"
+5) "uname_to_access:web:radon"
+6) "access_to_refresh:6b9334ff-32fb-4fa7-a159-10418684db90"
+7) "refresh:d1936aa5-5887-43ae-81f5-8f79c9142cfa"
+8) "refresh_auth:d1936aa5-5887-43ae-81f5-8f79c9142cfa"
+9) "auth_to_access:0ce3e5f8acd507206de3967878c21cd8"
+
+```
+
+
+
+## JWT与Oauth2
+
+### 默认token是完全随机的
+
+传统的token会**依赖于存储**, 不管是JVM进程内存还是redis内存.
+
+**先来看看Spring security默认的token生成方式: 直接根据一个随机的UUID值生成token**
+
+```JAVA
+	private OAuth2AccessToken createAccessToken(OAuth2Authentication authentication, 
+                                                OAuth2RefreshToken refreshToken) {
+		DefaultOAuth2AccessToken token = new 
+            //直接根据一个随机的UUID值生成token
+            DefaultOAuth2AccessToken(UUID.randomUUID().toString());
+		int validitySeconds = getAccessTokenValiditySeconds(authentication.getOAuth2Request());
+		if (validitySeconds > 0) {
+			token.setExpiration(new Date(System.currentTimeMillis() + (validitySeconds * 1000L)));
+		}
+		token.setRefreshToken(refreshToken);
+		token.setScope(authentication.getOAuth2Request().getScope());
+
+		return accessTokenEnhancer != null ? 
+            accessTokenEnhancer.enhance(token, authentication) : token;
+	}
+```
+
+### JWT (Json Web Token)
+
+JWT, 顾名思义, 是一种token的结构定义.
+
+**它不依赖于服务器端的存储, 服务器端不用存JWT, JWT是存储在客户端的.**
+
+![img](images/Spring Security/1821058-2e28fe6c997a60c9.webp)
+
+（1）JWT 默认是不加密，但也是可以加密的。生成原始 Token 以后，可以用密钥再加密一次。
+
+（2）JWT 不加密的情况下，不能将秘密数据写入 JWT。
+
+（3）JWT 不仅可以用于认证，也可以用于交换信息。有效使用 JWT，可以降低服务器查询数据库的次数。
+
+（4**）JWT 的最大缺点是，由于服务器不保存 session 状态，因此无法在使用过程中废止某个 token**，或者更改 token 的权限。也就是说，**一旦 JWT 签发了，在到期之前就会始终有效，除非服务器部署额外的逻辑。**
+
+（5）JWT 本身包含了认证信息，一旦泄露，任何人都可以获得该令牌的所有权限。为了减少盗用，JWT 的有效期应该设置得比较短。对于一些比较重要的权限，使用时应该再次对用户进行认证。
+
+（6）为了减少盗用，JWT 不应该使用 HTTP 协议明码传输，要使用 HTTPS 协议传输。
+
+
+
+为了更好的理解这个token是什么，我们先来看一个token生成后的样子，下面那坨乱糟糟的就是了。
+
+```
+eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ3YW5nIiwiY3JlYXRlZCI6MTQ4OTA3OTk4MTM5MywiZXhwIjoxNDg5Njg0NzgxfQ.RC-BYCe_UZ2URtWddUpWXIp4NMsoeq2O6UF-8tVplqXY1-CI9u1-a-9DAAJGfNWkHE81mpnR3gXzfrBAB3WUAg
+```
+
+但仔细看到的话还是可以看到这个token分成了三部分，每部分用 `.` 分隔，每段都是用 [Base64](https://link.jianshu.com?t=https://en.wikipedia.org/wiki/Base64) 编码的。如果我们用一个Base64的解码器的话 （ [https://www.base64decode.org/](https://link.jianshu.com?t=https://www.base64decode.org/) ），可以看到第一部分 `eyJhbGciOiJIUzUxMiJ9` 被解析成了:
+
+```
+{
+    "alg":"HS512"
+}
+```
+
+这是告诉我们HMAC采用HS512算法对JWT进行的签名。
+
+第二部分 `eyJzdWIiOiJ3YW5nIiwiY3JlYXRlZCI6MTQ4OTA3OTk4MTM5MywiZXhwIjoxNDg5Njg0NzgxfQ` 被解码之后是
+
+```
+{
+    "sub":"wang",
+    "created":1489079981393,
+    "exp":1489684781
+}
+```
+
+这段告诉我们这个Token中含有的数据声明（Claim），这个例子里面有三个声明：`sub`, `created` 和 `exp`。在我们这个例子中，分别代表着用户名、创建时间和过期时间，当然你可以把任意数据声明在这里。
+
+看到这里，你可能会想这是个什么鬼token，所有信息都透明啊，安全怎么保障？别急，我们看看token的第三段 `RC-BYCe_UZ2URtWddUpWXIp4NMsoeq2O6UF-8tVplqXY1-CI9u1-a-9DAAJGfNWkHE81mpnR3gXzfrBAB3WUAg`。同样使用Base64解码之后，咦，这是什么东东
+
+```
+D X �DmYTeȧL�UZcPZ0$gZAY�_7�wY@ 
+```
+
+最后一段其实是签名，这个签名必须知道秘钥才能计算。这个也是JWT的安全保障。这里提一点注意事项，由于数据声明（Claim）是公开的，千万不要把密码等敏感字段放进去，否则就等于是公开给别人了。
+
+也就是说JWT是由三段组成的，按官方的叫法分别是header（头）、payload（负载）和signature（签名）：
+
+```
+header.payload.signature
+```
+
+头中的数据通常包含两部分：一个是我们刚刚看到的 `alg`，这个词是 `algorithm` 的缩写，就是指明算法。另一个可以添加的字段是token的类型(按RFC 7519实现的token机制不只JWT一种)，但如果我们采用的是JWT的话，指定这个就多余了。
+
+```
+{
+  "alg": "HS512",
+  "typ": "JWT"
+}
+```
+
+payload中可以放置三类数据：系统保留的、公共的和私有的：
+
+- 系统保留的声明（Reserved claims）：这类声明不是必须的，但是是建议使用的，包括：iss (签发者), exp (过期时间), sub (主题), aud (目标受众)等。这里我们发现都用的缩写的三个字符，这是由于JWT的目标就是尽可能小巧。
+- 公共声明：这类声明需要在 [IANA JSON Web Token Registry](https://link.jianshu.com?t=http://www.iana.org/assignments/jwt/jwt.xhtml) 中定义或者提供一个URI，因为要避免重名等冲突。
+- 私有声明：这个就是你根据业务需要自己定义的数据了。
+
+签名的过程是这样的：采用header中声明的算法，接受三个参数：base64编码的header、base64编码的payload和秘钥（secret）进行运算。签名这一部分如果你愿意的话，可以采用RSASHA256的方式进行公钥、私钥对的方式进行，如果安全性要求的高的话。
+
+```
+HMACSHA256(
+  base64UrlEncode(header) + "." +
+  base64UrlEncode(payload),
+  secret)
+```
+
+
+
+### 使用JWT token
+
+
+
+## 注意事项
+
+#### 1. scope
+
+不同模式下scope的决定方式不同, 在授权码模式下由对`GET /oauth/authorize`的请求参数决定, 而用户密码认证模式和客户端认证模式下由`/oauth/authorize`决定.
+
+#### 2. spring security 的 token获取机制
+
+相同的用户和客户端两次获取token, 如果相差时间没有超过第一次获取token时的失效时间, 返回的将是相同的token.
 

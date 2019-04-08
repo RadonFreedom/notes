@@ -729,3 +729,130 @@ public class DefaultErrorViewResolver implements ErrorViewResolver, Ordered {
 
 
 
+## Spring boot 与 自定义yml配置指南
+
+记一次我自定义在yml文件中配置 Spring security Oauth2 Server 中客户端认证信息的过程.
+
+**我写的`Oauth2ServerClientsProperties`, 用来装载在yml中配置的客户端认证信息.**
+
+```JAVA
+@ConfigurationProperties(prefix = "security.oauth2.server")
+public class Oauth2ServerClientsProperties {
+
+    private Map<String, Oauth2ClientProperties> clients = new LinkedHashMap<>();
+
+    public Map<String, Oauth2ClientProperties> getClients() {
+        return clients;
+    }
+
+    public void setClients(Map<String, Oauth2ClientProperties> clients) {
+        this.clients = clients;
+    }
+
+    public static class Oauth2ClientProperties {
+
+        private String clientId;
+
+        private String[] authorizedGrantTypes = {};
+
+        private String[] authorities = {};
+
+        private Integer accessTokenValiditySeconds;
+
+        private Integer refreshTokenValiditySeconds;
+
+        private String[] scopes = {};
+
+        private String[] autoApproveScopes = {};
+
+        private String secret;
+
+        private String[] redirectUris = {};
+
+        private String[] resourceIds = {};
+
+        private boolean autoApprove;
+
+        //getter&setter省略
+    }
+}
+
+```
+
+**对应的yml配置也可以当做范本**:
+
+```YML
+security:
+  oauth2:
+    server:
+      clients:
+        client:
+          client-id: client
+          secret: radon
+          authorized-grant-types:
+            - authorization_code
+            - refresh_token
+          redirectUris: /redirect
+          scopes: client
+
+        web:
+          client-id: web
+          secret: radon
+          authorized-grant-types:
+            - password
+            - refresh_token
+          scopes: ui
+
+        account-service:
+          client-id: account-service
+          secret: radon
+          authorized-grant-types:
+            - client_credentials
+            - refresh_token
+          scopes: server
+```
+
+**最后是取出值并传入原配置方式之中**:
+
+```JAVA
+@EnableAuthorizationServer
+//引入装载的配置
+@EnableConfigurationProperties(Oauth2ServerClientsProperties.class)
+@Configuration
+public class Oauth2ServerConfig extends AuthorizationServerConfigurerAdapter {
+    
+        @Override
+    public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
+        //基于YML配置, 请在配置文件中添加相关配置
+        InMemoryClientDetailsServiceBuilder inMemoryClientDetailsServiceBuilder = 
+            clients.inMemory();
+
+        //取出clients中的值并一一配置, Oauth2ClientProperties和官方的ClientBuilder是对应关系
+        for (Oauth2ServerClientsProperties.Oauth2ClientProperties client : 
+             oauth2ServerClientsProperties.getClients().values()) {
+            ClientDetailsServiceBuilder.ClientBuilder builder = 
+                inMemoryClientDetailsServiceBuilder
+                //withClient会new一个ClientBuilder返回
+                    .withClient(client.getClientId())
+                    .authorizedGrantTypes(client.getAuthorizedGrantTypes())
+                    .authorities(client.getAuthorities())
+                    .scopes(client.getScopes())
+                    .autoApprove(client.getAutoApproveScopes())
+                    .autoApprove(client.isAutoApprove())
+                    .secret(client.getSecret())
+                    .redirectUris(client.getRedirectUris())
+                    .resourceIds(client.getResourceIds());
+
+            //由于配置方法的参数是原始类型, 必须进行非空校验再传入
+            if (client.getAccessTokenValiditySeconds() != null) {
+                builder.accessTokenValiditySeconds(client.getAccessTokenValiditySeconds());
+            }
+            if (client.getAccessTokenValiditySeconds() != null) {
+                builder.refreshTokenValiditySeconds(client.getRefreshTokenValiditySeconds());
+            }
+        }
+    }
+}
+```
+
