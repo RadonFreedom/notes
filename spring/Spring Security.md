@@ -1417,7 +1417,7 @@ public class Oauth2Config extends AuthorizationServerConfigurerAdapter {
 
 
 
-## 使用yml自定义Oauth2客户端配置
+## 使用yml自定义Oauth2客户端认证信息
 
 **为了能够方便配置客户端认证信息, 实现配置信息和java代码解耦, 打算从yml配置中装载 Oauth2 认证服务器对客户端认证信息的配置.**
 
@@ -1616,7 +1616,7 @@ PONG
 
 
 
-## JWT与Oauth2
+## TODO JWT与Oauth2
 
 ### 默认token是完全随机的
 
@@ -1733,6 +1733,10 @@ HMACSHA256(
 
 
 ### 使用JWT token
+
+
+
+## TODO 微服务下的认证
 
 
 
