@@ -37,7 +37,7 @@ Netflix Hystrix
 | 微服务架构所需功能               | Dubbo         | Spring Cloud        |
 | -------------------------------- | ------------- | ------------------- |
 | 服务注册中心                     | Zookeeper     | Netflix Eureka      |
-| 服务调用方式                     | RPC           | REST API            |
+| 服务调用方式                     | RPC           | REST API + feign    |
 | 服务监控                         | Dubbo-monitor | Spring Boot Admin   |
 | 断路器                           | 不完善        | Netflix Hystrix     |
 | 服务网关（客户端与服务负载均衡） | 无            | Netflix Zuul        |
@@ -111,7 +111,7 @@ Eureka Client没有写service ID，则默认为属性值  `${spring.application.
 
 Eureka客户会每隔30秒发送一次心跳来续约。 通过续约来告知Eureka Server该Eureka客户仍然存在，没有出现问题。 正常情况下，如果Eureka Server在90秒没有收到Eureka客户的续约，它会将实例从其注册表中删除。 建议不要更改续约间隔。
 
-#### Fetch Registries：获取注册列表信息
+#### Refresh Registry：获取注册列表信息
 
 Eureka客户端从服务器获取注册表信息，并将其缓存在本地。客户端会使用该信息查找其他服务，从而进行远程调用。该注册列表信息定期（每30秒钟）更新一次。每次返回注册列表信息可能与Eureka客户端的缓存信息不同， Eureka客户端自动处理。如果由于某种原因导致注册列表信息不能及时匹配，Eureka客户端则会重新获取整个注册表信息。 Eureka服务器缓存注册列表信息，整个注册表以及每个应用程序的信息进行了压缩，压缩内容和没有压缩的内容完全相同。默认的情况下Eureka客户端使用压缩JSON格式来获取注册列表的信息。
 
@@ -123,11 +123,11 @@ Eureka客户端在程序关闭时向Eureka服务器发送取消请求。 发送�
 DiscoveryManager.getInstance().shutdownComponent()；
 ```
 
-#### Eviction 服务剔除
+#### Expiration: 服务剔除
 
 在默认的情况下，当Eureka客户端连续90秒没有向Eureka服务器发送服务续约，即心跳，Eureka服务器会将该服务实例从服务注册列表删除，即服务剔除。
 
-#### Eureka 的自我保护模式
+#### Eureka Server 的自我保护模式
 
 当一个新的Eureka Server出现时，它尝试从相邻节点获取所有实例注册表信息。如果从Peer节点获取信息时出现问题，Eureka Serve会尝试其他的Peer节点。如果服务器能够成功获取所有实例，则根据该信息设置应该接收的更新阈值。
 
@@ -135,21 +135,26 @@ DiscoveryManager.getInstance().shutdownComponent()；
 
 这样做的好处就是，如果是Eureka Server自身的网络问题，导致Eureka Client的续约不上，Eureka Client的注册列表信息不再被删除，也就是Eureka Client还可以被其他服务消费。
 
-#### Eureka的高可用架构
+#### Eureka Server 的高可用架构
 
-如图为Eureka的高级架构图.
+在eureka配置中, 有关于instance的配置, 表明一个注册中心服务下可以包含多个实例, 他们的是`spring.application.name`应是相同的:
 
 ![Eurekaçé"çº§æ¶æå¾](images/Spring Cloud/eureka_architecture.png)从图可以看出在这个体系中，有2个角色，即Eureka Server和Eureka Client。而Eureka Client又分为Applicaton Service和Application Client，即服务提供者何服务消费者。 每个区域有一个Eureka集群，并且每个区域至少有一个eureka服务器可以处理区域故障，以防服务器瘫痪。
 
 Eureka Client向Eureka Server注册，并将自己的一些客户端信息发送Eureka Server。然后，Eureka Client通过向Eureka Serve发送心跳（每30秒）来续约服务的。 如果客户端持续不能续约，那么，它将在大约90秒内从服务器注册表中删除。 注册信息和续订被复制到集群中的Eureka Serve所有节点。 来自任何区域的Eureka Client都可以查找注册表信息（每30秒发生一次）。根据这些注册表信息，Application Client可以远程调用Applicaton Service来消费服务。
 
+![img](images/Spring Cloud/01-1555055086191.png)
+
+- Eureka-Server 集群不区分**主从节点**或者 **Primary & Secondary 节点**，所有节点**相同角色( 也就是没有角色 )，完全对等**。
+- Eureka-Client 可以向**任意** Eureka-Client 发起任意**读写**操作，Eureka-Server 将操作复制到另外的 Eureka-Server 以达到**最终一致性**。注意，Eureka-Server 是选择了 AP 的组件。
 
 
-## 原理与配置详解
 
-### 客户端原理: `DiscoveryClient`
 
-在`com.netflix.discovery`包下的`DiscoveryClient`类，该类包含了Eureka Client的相关方法。
+
+## 客户端原理: `DiscoveryClient`
+
+在`com.netflix.discovery`包下的`DiscoveryClient`类，**被加入容器后调用其构造器方法进行一系列操作**, 该类包含了Eureka Client的相关方法。
 
 ![1554716190746](images/Spring Cloud/1554716190746.png)
 
@@ -463,7 +468,7 @@ public class DiscoveryClient implements EurekaClient {
 
 来看看上面提到的两个在`DiscoveryClient`中的任务(其实就是方法):
 
-#### 服务续约(发送心跳包)与刷新客户端的本地注册表
+#### 服务续约与注册表获取
 
 - renew(): 发送心跳包
 - refreshRegistry(): 刷新注册表
@@ -736,54 +741,496 @@ class InstanceInfoReplicator implements Runnable {
 
 
 
-### 服务器原理: `EurekaBootStrap`
+## 服务器原理
 
-然后在来看Eureka server端的代码，在Maven的eureka-core:1.6.2的jar包下。打开com.netflix.eureka包，很轻松的就发现了又一个EurekaBootStrap的类，BootStrapContext具有最先初始化的权限，所以先看这个类。
+服务器端的基础功能有:
 
-protected void initEurekaServerContext() throws Exception {
+- Register
+- Renew
+- Cancel
+- Expiration
+- Status Changes
 
- ...//省略代码
-   PeerAwareInstanceRegistry registry;
-        if (isAws(applicationInfoManager.getInfo())) {
-           ...//省略代码，如果是AWS的代码
-        } else {
-            registry = new PeerAwareInstanceRegistryImpl(
-                    eurekaServerConfig,
-                    eurekaClient.getEurekaClientConfig(),
-                    serverCodecs,
-                    eurekaClient
+服务器端的特殊功能有:
+
+- 集群架构下的信息同步
+  - 集群节点之间的节点信息同步
+  - 集群节点之间的注册表同步
+- 自我保护模式
+
+
+
+其中, 在服务器启动时, 要想满足上述功能, 需要做的事情有:
+
+- 获取集群节点信息`PeerEurekaNodes`
+- 复制对等节点的注册表
+
+在服务器运行时, 需要做的事情有:
+
+- 每隔一段时间, 同步自己的集群节点信息`PeerEurekaNodes`, 通过client
+- 将在本节点上进行的客户端操作同步到其他节点
+- 接收其他节点的同步信息
+
+
+
+### 服务器启动原理
+
+#### `PeerEurekaNode`: 对等的eureka节点
+
+`PeerEurekaNode`代表了注册中心集群中的其中一个节点.
+
+> ![img](images/Spring Cloud/01.png)
+>
+> - Eureka-Server 集群不区分**主从节点**或者 **Primary & Secondary 节点**，所有节点**相同角色( 也就是没有角色 )，完全对等**。
+> - Eureka-Client 可以向**任意** Eureka-Client 发起任意**读写**操作，Eureka-Server 将操作复制到另外的 Eureka-Server 以达到**最终一致性**。注意，Eureka-Server 是选择了 AP 的组件。
+
+![1555055575282](images/Spring Cloud/1555055575282.png)
+
+
+
+#### `PeerEurekaNodes`
+
+![1555053940375](images/Spring Cloud/1555053940375.png)
+
+如上图所示, `DefaultEurekaServerContext`被加入容器后调用其初始化方法, 最重要的就是进行`peerEurekaNodes.start()`.
+
+```JAVA
+    //这个注解指明这个方法需要生命周期初始化时调用
+	@PostConstruct
+    @Override
+    public void initialize() {
+        logger.info("Initializing ...");
+        peerEurekaNodes.start();
+        try {
+            registry.init(peerEurekaNodes);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        logger.info("Initialized");
+    }
+
+```
+
+
+
+#### 集群中单个节点的启动
+
+调用 `PeerEurekaNodes#start()` 方法，集群节点启动，主要完成两个逻辑：
+
+- 初始化集群节点信息
+- 初始化固定周期( 默认：10 分钟，可配置 )更新集群节点信息的任务
+
+```JAVA
+    public void start() {
+        //初始化调度线程
+        taskExecutor = Executors.newSingleThreadScheduledExecutor(
+                new ThreadFactory() {
+                    @Override
+                    public Thread newThread(Runnable r) {
+                        Thread thread = new Thread(r, "Eureka-PeerNodesUpdater");
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+                }
+        );
+        try {
+            //第一次update其实是初始化集群节点信息, 后面再次调用才是更新信息
+            updatePeerEurekaNodes(resolvePeerUrls());
+             //初始化固定周期更新集群节点信息的任务
+            Runnable peersUpdateTask = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        updatePeerEurekaNodes(resolvePeerUrls());
+                    } catch (Throwable e) {
+                        logger.error("Cannot update the replica Nodes", e);
+                    }
+
+                }
+            };
+            //将上面的peersUpdateTask加入调度线程的任务中
+            //每隔一段时间执行一次
+            taskExecutor.scheduleWithFixedDelay(
+                    peersUpdateTask,
+                	//与server.peer-eureka-nodes-update-interval-ms配置相对应
+                	//配置updatePeerEurekaNodes(resolvePeerUrls())每次执行的时间间隔
+                	//默认 600000ms=10min
+                    serverConfig.getPeerEurekaNodesUpdateIntervalMs(),
+                    serverConfig.getPeerEurekaNodesUpdateIntervalMs(),
+                    TimeUnit.MILLISECONDS
             );
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+        for (PeerEurekaNode node : peerEurekaNodes) {
+            logger.info("Replica node URL:  {}", node.getServiceUrl());
+        }
+    }
+```
+
+
+
+#### 更新集群节点信息, 通过自己的client
+
+来看看`updatePeerEurekaNodes(resolvePeerUrls());` :
+
+```JAVA
+    protected List<String> resolvePeerUrls() {
+        
+        //解析出所有的集群中节点的URL
+        InstanceInfo myInfo = applicationInfoManager.getInfo();
+        String zone = 
+            //得到自己的zone, 在配置文件中配置键值对的键
+            InstanceInfo.getZone
+            (clientConfig.getAvailabilityZones(clientConfig.getRegion()), myInfo);
+    	//得到和自己zone相同的replica(复制品, 就是其他节点)的Url
+        List<String> replicaUrls = EndpointUtils
+            .getDiscoveryServiceUrls
+            (clientConfig, zone, new EndpointUtils.InstanceInfoBasedUrlRandomizer(myInfo));
+
+        //删除自己的URL
+        int idx = 0;
+        while (idx < replicaUrls.size()) {
+            //在第一次调用时, serverConfig.getMyUrl()为空, 所以不会删除掉自己的节点
+            if (isThisMyUrl(replicaUrls.get(idx))) {
+                replicaUrls.remove(idx);
+            } else {
+                idx++;
+            }
+        }
+        return replicaUrls;
+    }
+
+    public boolean isThisMyUrl(String url) {
+        final String myUrlConfigured = serverConfig.getMyUrl();
+        if (myUrlConfigured != null) {
+            return myUrlConfigured.equals(url);
+        }
+        return isInstanceURL(url, applicationInfoManager.getInfo());
+    }
+```
+
+```JAVA
+    /*
+    PeerEurekaNodes中两个域保存了集群中所有节点的信息
+    每次updatePeerEurekaNodes(resolvePeerUrls());实际上就是更新这两个域而已
+    */
+	private volatile List<PeerEurekaNode> peerEurekaNodes = Collections.emptyList();
+    private volatile Set<String> peerEurekaNodeUrls = Collections.emptySet();
+
+	protected void updatePeerEurekaNodes(List<String> newPeerUrls) {
+        if (newPeerUrls.isEmpty()) {
+            logger.warn("The replica size seems to be empty. Check the route 53 DNS Registry");
+            return;
         }
 
-        PeerEurekaNodes peerEurekaNodes = getPeerEurekaNodes(
-                registry,
-                eurekaServerConfig,
-                eurekaClient.getEurekaClientConfig(),
-                serverCodecs,
-                applicationInfoManager
-        );
- }
-其中PeerAwareInstanceRegistryImpl和PeerEurekaNodes两个类看其命名，应该和服务注册以及Eureka Server高可用有关。先追踪PeerAwareInstanceRegistryImpl类，在该类有个register()方法，该方法提供了注册，并且将注册后信息同步到其他的Eureka Server服务。代码如下：
+        //因为刚刚解析出了newPeerUrls, 把所有旧的节点都加入toShutdown之列
+        Set<String> toShutdown = new HashSet<>(peerEurekaNodeUrls);
+        //如果之前的某个节点在newPeerUrls中, 说明它不用被toShutdown
+        toShutdown.removeAll(newPeerUrls);
+        //得到真正新加入的节点
+        Set<String> toAdd = new HashSet<>(newPeerUrls);
+        toAdd.removeAll(peerEurekaNodeUrls);
 
-public void register(final InstanceInfo info, final boolean isReplication) {
+        //关闭和新增都为空, 直接返回
+        if (toShutdown.isEmpty() && toAdd.isEmpty()) { // No change
+            return;
+        }
+
+        // Remove peers no long available
+        List<PeerEurekaNode> newNodeList = new ArrayList<>(peerEurekaNodes);
+
+        if (!toShutdown.isEmpty()) {
+            logger.info("Removing no longer available peer nodes {}", toShutdown);
+            int i = 0;
+            while (i < newNodeList.size()) {
+                PeerEurekaNode eurekaNode = newNodeList.get(i);
+                if (toShutdown.contains(eurekaNode.getServiceUrl())) {
+                    newNodeList.remove(i);
+                    //关闭这个节点
+                    eurekaNode.shutDown();
+                } else {
+                    i++;
+                }
+            }
+        }
+
+        // Add new peers
+        if (!toAdd.isEmpty()) {
+            logger.info("Adding new peer nodes {}", toAdd);
+            for (String peerUrl : toAdd) {
+                //createPeerEurekaNode还创建了JerseyReplicationClient,见下
+                newNodeList.add(createPeerEurekaNode(peerUrl));
+            }
+        }
+
+        this.peerEurekaNodes = newNodeList;
+        this.peerEurekaNodeUrls = new HashSet<>(newPeerUrls);
+    }
+```
+
+```java
+    protected PeerEurekaNode createPeerEurekaNode(String peerEurekaNodeUrl) {
+        //创建JerseyReplicationClient
+        HttpReplicationClient replicationClient = JerseyReplicationClient.
+        createReplicationClient(serverConfig, serverCodecs, peerEurekaNodeUrl);
+        
+        String targetHost = hostFromUrl(peerEurekaNodeUrl);
+        if (targetHost == null) {
+            targetHost = "host";
+        }
+        return new PeerEurekaNode
+            (registry, targetHost, peerEurekaNodeUrl, replicationClient, serverConfig);
+    }
+```
+
+
+
+#### `EurekaServerBootstrap`
+
+在`EurekaServerInitializerConfiguration`的生命周期方法`start()`中, 用一个新线程执行了`EurekaServerBootstrap` 的初始化生命周期方法`eurekaServerBootstrap.contextInitialized()`
+
+![1555060051156](images/Spring Cloud/1555060051156.png)
+
+```JAVA
+	@Override
+	public void start() {
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					// TODO: is this class even needed now?
+					eurekaServerBootstrap.contextInitialized(
+							EurekaServerInitializerConfiguration.this.servletContext);
+					log.info("Started Eureka Server");
+
+					publish(new EurekaRegistryAvailableEvent(getEurekaServerConfig()));
+					EurekaServerInitializerConfiguration.this.running = true;
+					publish(new EurekaServerStartedEvent(getEurekaServerConfig()));
+				}
+				catch (Exception ex) {
+					// Help!
+					log.error("Could not initialize Eureka servlet context", ex);
+				}
+			}
+		}).start();
+	}
+```
+
+```JAVA
+	public void contextInitialized(ServletContext context) {
+		try {
+            //进行默认环境配置
+			initEurekaEnvironment();
+            //初始化EurekaServerContext
+			initEurekaServerContext();
+
+			context.setAttribute(EurekaServerContext.class.getName(), this.serverContext);
+		}
+		catch (Throwable e) {
+			log.error("Cannot bootstrap eureka server :", e);
+			throw new RuntimeException("Cannot bootstrap eureka server :", e);
+		}
+	}
+```
+
+```JAVA
+	protected void initEurekaServerContext() throws Exception {
+        ...
+     
+		// Copy registry from neighboring eureka node
+		int registryCount = this.registry.syncUp();
+		this.registry.openForTraffic(this.applicationInfoManager, registryCount);
+
+		// Register all monitoring statistics.
+		EurekaMonitors.registerAllStats();
+	}
+```
+
+#### 获取并复制注册表, 仍然通过自己的client
+
+因为这个节点刚启动起来, 还没有注册表, 所以调用到了`PeerAwareInstanceRegistryImpl#syncUp()`来复制注册表.
+
+> Populates the registry information from a peer eureka node. This operation fails over to other nodes until the list is exhausted if the communication fails.
+>
+> 使用来自对等eureka节点的注册表信息来填充自己的注册表。 如果通信失败，则此操作将转移到其他节点，直到列表用尽为止。
+
+```JAVA
+//PeerAwareInstanceRegistryImpl.java
+
+	public int syncUp() {
+        // Copy entire entry from neighboring DS node
+        int count = 0;
+
+        //Get the number of times that a eureka node 
+        //would try to get the registry information from the peers during startup.
+        //server.registry-sync-retries, 默认5
+        //因为有count == 0作为循环条件, 一旦成功注册一个就会跳出循环
+        for (int i = 0; ((i < serverConfig.getRegistrySyncRetries()) && (count == 0)); i++) {
+            if (i > 0) {
+                try {
+                    //registry-sync-retry-wait-ms, 默认30000ms=30s
+                    Thread.sleep(serverConfig.getRegistrySyncRetryWaitMs());
+                } catch (InterruptedException e) {
+                    logger.warn("Interrupted during registry transfer..");
+                    break;
+                }
+            }
+            
+            //从自己自带的eurekaClient来得到注册表
+            Applications apps = eurekaClient.getApplications();
+            for (Application app : apps.getRegisteredApplications()) {
+                for (InstanceInfo instance : app.getInstances()) {
+                    try {
+                        if (isRegisterable(instance)) {
+                            register(instance, instance.getLeaseInfo().getDurationInSecs(), true);
+                            count++;
+                        }
+                    } catch (Throwable t) {
+                        logger.error("During DS init copy", t);
+                    }
+                }
+            }
+        }
+        return count;
+    }
+```
+
+若调用 `#syncUp()` 方法，未获取到应用实例，则 Eureka-Server 会有一段时间( 默认：5 分钟，可配 )不允许被 Eureka-Client 获取注册信息，避免影响 Eureka-Client 。
+
+- 标记 Eureka-Server 启动时，未获取到应用实例，代码如下：
+
+  ```JAVA
+  // PeerAwareInstanceRegistryImpl.java
+  
+  private boolean peerInstancesTransferEmptyOnStartup = true;
+  
+  public void openForTraffic(ApplicationInfoManager applicationInfoManager, int count) {
+      // ... 省略其他代码
+      if (count > 0) {
+          this.peerInstancesTransferEmptyOnStartup = false;
+      }
+      // ... 省略其他代码
+  }
+  ```
+
+- 判断 Eureka-Server 是否允许被 Eureka-Client 获取注册信息，代码如下：
+
+  ```JAVA
+  // PeerAwareInstanceRegistryImpl.java
+  public boolean shouldAllowAccess(boolean remoteRegionRequired) {
+     if (this.peerInstancesTransferEmptyOnStartup) {
+         // 设置启动时间
+         this.startupTime = System.currentTimeMillis();
+         if (!(System.currentTimeMillis() > this.startupTime + serverConfig.getWaitTimeInMsWhenSyncEmpty())) {
+             return false;
+         }
+     }
+     // ... 省略其他代码
+     return true;
+  }
+  ```
+
+
+
+### 服务器注册表同步原理
+
+**本节点操作同步其他节点与接受其他节点的同步都是相同的方法, 只是接受其他节点同步信息时`isReplication`会被标记为true, 因此不会再把本来就是复制品的信息再次广播出去.**
+
+**从下面讲到的通信原理, 可以看出最后究竟是怎么调用到这些方法的.**
+
+`PeerAwareInstanceRegistryImpl`中实现了这些功能, 以注册为例:
+
+> Registers the information about the InstanceInfo and replicates this information to all peer eureka nodes. If this is replication event from other replica nodes then it is not replicated.
+
+```JAVA
+    @Override
+    public void register(final InstanceInfo info, final boolean isReplication) {
         int leaseDuration = Lease.DEFAULT_DURATION_IN_SECS;
         if (info.getLeaseInfo() != null && info.getLeaseInfo().getDurationInSecs() > 0) {
             leaseDuration = info.getLeaseInfo().getDurationInSecs();
         }
+        //注册到本节点
         super.register(info, leaseDuration, isReplication);
-        replicateToPeers(Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
+        //复制到其他节点
+        replicateToPeers
+            (Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
     }
-1
-2
-3
-4
-5
-6
-7
-8
-其中 super.register(info, leaseDuration, isReplication)方法，点击进去到子类AbstractInstanceRegistry可以发现更多细节，其中注册列表的信息被保存在一个Map中。replicateToPeers()方法，即同步到其他Eureka Server的其他Peers节点，追踪代码，发现它会遍历循环向所有的Peers节点注册，最终执行类PeerEurekaNodes的register()方法，该方法通过执行一个任务向其他节点同步该注册信息，代码如下：
+```
 
-  public void register(final InstanceInfo info) throws Exception {
+```JAVA
+    private void replicateToPeers(Action action, String appName, String id,
+                                  InstanceInfo info /* optional */,
+                                  InstanceStatus newStatus /* optional */, boolean isReplication) 
+    {
+        Stopwatch tracer = action.getTimer().start();
+        try {
+            if (isReplication) {
+                numberOfReplicationsLastMin.increment();
+            }
+            // If it is a replication already
+            //do not replicate again as this will create a poison replication
+            if (peerEurekaNodes == Collections.EMPTY_LIST || isReplication) {
+                return;
+            }
+
+            for (final PeerEurekaNode node : peerEurekaNodes.getPeerEurekaNodes()) {
+                // If the url represents this host, do not replicate to yourself.
+                if (peerEurekaNodes.isThisMyUrl(node.getServiceUrl())) {
+                    continue;
+                }
+                replicateInstanceActionsToPeers(action, appName, id, info, newStatus, node);
+            }
+        } finally {
+            tracer.stop();
+        }
+    }
+```
+
+```JAVA
+    private void replicateInstanceActionsToPeers(Action action, String appName,
+                                                 String id, InstanceInfo info, 
+                                                 InstanceStatus newStatus,
+                                                 PeerEurekaNode node) 
+    {
+        try {
+            InstanceInfo infoFromRegistry = null;
+            CurrentRequestVersion.set(Version.V2);
+            switch (action) {
+                case Cancel:
+                    node.cancel(appName, id);
+                    break;
+                case Heartbeat:
+                    InstanceStatus overriddenStatus = overriddenInstanceStatusMap.get(id);
+                    infoFromRegistry = getInstanceByAppAndId(appName, id, false);
+                    node.heartbeat(appName, id, infoFromRegistry, overriddenStatus, false);
+                    break;
+                case Register:
+                    node.register(info);
+                    break;
+                case StatusUpdate:
+                    infoFromRegistry = getInstanceByAppAndId(appName, id, false);
+                    node.statusUpdate(appName, id, newStatus, infoFromRegistry);
+                    break;
+                case DeleteStatusOverride:
+                    infoFromRegistry = getInstanceByAppAndId(appName, id, false);
+                    node.deleteStatusOverride(appName, id, infoFromRegistry);
+                    break;
+            }
+        } catch (Throwable t) {
+            logger.error("Cannot replicate information to {} for action {}",
+                         node.getServiceUrl(), action.name(), t);
+        }
+    }
+```
+
+可以发现最后调用到了每个`PeerEurekaNode`的对应方法来实现节点复制, 仍以注册为例:
+
+> Sends the registration information of InstanceInfo receiving by this node to the peer node represented by this class.
+
+```java
+//PeerEurekaNode.java    
+    public void register(final InstanceInfo info) throws Exception {
         long expiryTime = System.currentTimeMillis() + getLeaseRenewalOf(info);
         batchingDispatcher.process(
                 taskId("register", info),
@@ -792,140 +1239,509 @@ public void register(final InstanceInfo info, final boolean isReplication) {
                         return replicationClient.register(info);
                     }
                 },
-                expiryTime
-        );
+                expiryTime);
     }
-
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-经过一系列的源码追踪，可以发现PeerAwareInstanceRegistryImpl的register()方法实现了服务的注册，并且向其他Eureka Server的Peer节点同步了该注册信息，那么register()方法被谁调用了呢？之前在Eureka Client的分析可以知道，Eureka Client是通过 http来向Eureka Server注册的，那么Eureka Server肯定会提供一个注册的接口给Eureka Client调用，那么PeerAwareInstanceRegistryImpl的register()方法肯定最终会被暴露的Http接口所调用。在Idea开发工具，按住alt+鼠标左键，可以很快定位到ApplicationResource类的addInstance ()方法，即服务注册的接口，其代码如下：
+```
 
 
-@POST
-    @Consumes({"application/json", "application/xml"})
-    public Response addInstance(InstanceInfo info,
-                                @HeaderParam(PeerEurekaNode.HEADER_REPLICATION) String isReplication) {
-       
-    ...//省略代码                 
-               registry.register(info, "true".equals(isReplication));
-        return Response.status(204).build();  // 204 to be backwards compatible
-    }
 
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-Renew服务续约
-服务续约和服务注册非常类似，通过之前的分析可以知道，服务注册在Eureka Client程序启动之后开启，并同时开启服务续约的定时任务。在eureka-client-1.6.2.jar的DiscoveryClient的类下有renew()方法，其代码如下：
+### eureka服务器最终一致性原理
 
-  /**
-     * Renew with the eureka service by making the appropriate REST call
-     */
-    boolean renew() {
-        EurekaHttpResponse<InstanceInfo> httpResponse;
-        try {
-            httpResponse = eurekaTransport.registrationClient.sendHeartBeat(instanceInfo.getAppName(), instanceInfo.getId(), instanceInfo, null);
-            logger.debug("{} - Heartbeat status: {}", PREFIX + appPathIdentifier, httpResponse.getStatusCode());
-            if (httpResponse.getStatusCode() == 404) {
-                REREGISTER_COUNTER.increment();
-                logger.info("{} - Re-registering apps/{}", PREFIX + appPathIdentifier, instanceInfo.getAppName());
-                return register();
+- Eureka-Server 是允许**同一时刻**在任意节点被 Eureka-Client 发起**写入**相关的操作
+- 网络是不可靠的资源，Eureka-Client 可能向一个 Eureka-Server 注册成功，但是网络波动，导致 Eureka-Client 误以为失败，此时恰好 Eureka-Client 变更了应用实例的状态，重试向另一个 Eureka-Server 注册，那么两个 Eureka-Server 对该应用实例的状态产生冲突。
+
+网络波动真的很复杂。我们来看看 Eureka 是怎么处理的。
+
+应用实例( InstanceInfo ) 的 `lastDirtyTimestamp` 属性，使用**时间戳**，表示应用实例的**版本号**，当请求方( 不仅仅是 Eureka-Client ，也可能是同步注册操作的 Eureka-Server ) 向 Eureka-Server 发起注册时，若 Eureka-Server 已存在拥有更大 `lastDirtyTimestamp` 该实例( **相同应用并且相同应用实例编号被认为是相同实例** )，则请求方注册的应用实例( InstanceInfo ) 无法覆盖注册此 Eureka-Server 的该实例( 见 `AbstractInstanceRegistry#register(...)` 方法 )。
+
+因为应用实例状态变更时，设置 `lastDirtyTimestamp` 为当前时间，见`ApplicationInfoManager#setInstanceStatus(status)` 方法 。
+
+但是光靠**注册**请求判断 `lastDirtyTimestamp` 显然是不够的，因为网络异常情况下时，同步操作任务多次执行失败到达过期时间后，此时在 Eureka-Server 集群同步起到最终一致性**最**关键性出现了：Heartbeat 。因为 Heartbeat 会周期性的执行，通过它一方面可以判断 Eureka-Server 是否存在心跳对应的应用实例，另外一方面可以比较应用实例的 `lastDirtyTimestamp` 。当满足下面任意条件，Eureka-Server 返回 404 状态码：
+
+- 1）Eureka-Server 应用实例不存在。
+
+```JAVA
+    public void heartbeat(final String appName, final String id,
+                          final InstanceInfo info, final InstanceStatus overriddenStatus,
+                          boolean primeConnection) throws Throwable {
+        if (primeConnection) {
+            // We do not care about the result for priming request.
+            replicationClient.sendHeartBeat(appName, id, info, overriddenStatus);
+            return;
+        }
+        ReplicationTask replicationTask = new InstanceReplicationTask(targetHost, Action.Heartbeat, info, overriddenStatus, false) {
+            @Override
+            public EurekaHttpResponse<InstanceInfo> execute() throws Throwable {
+                return replicationClient.sendHeartBeat(appName, id, info, overriddenStatus);
             }
-            return httpResponse.getStatusCode() == 200;
-        } catch (Throwable e) {
-            logger.error("{} - was unable to send heartbeat!", PREFIX + appPathIdentifier, e);
-            return false;
+
+            @Override
+            public void handleFailure(int statusCode, Object responseEntity) throws Throwable {
+                super.handleFailure(statusCode, responseEntity);
+                if (statusCode == 404) {
+                    logger.warn("{}: missing entry.", getTaskName());
+                    if (info != null) {
+                        logger.warn("{}: cannot find instance id {} and hence replicating the instance with status {}",
+                                getTaskName(), info.getId(), info.getStatus());
+                        register(info);
+                    }
+                } else if (config.shouldSyncWhenTimestampDiffers()) {
+                    InstanceInfo peerInstanceInfo = (InstanceInfo) responseEntity;
+                    if (peerInstanceInfo != null) {
+                        syncInstancesIfTimestampDiffers(appName, id, info, peerInstanceInfo);
+                    }
+                }
+            }
+        };
+        long expiryTime = System.currentTimeMillis() + getLeaseRenewalOf(info);
+        batchingDispatcher.process(taskId("heartbeat", info), replicationTask, expiryTime);
+    }
+```
+
+
+
+- 2）Eureka-Server 应用实例状态为 `UNKNOWN`。
+- 3）请求的 `lastDirtyTimestamp` 更大。
+
+请求方接收到 404 状态码返回后，**认为 Eureka-Server 应用实例实际是不存在的**，重新发起应用实例的注册。以本文的 Heartbeat 为例子，代码如下：
+
+```java
+// PeerEurekaNode#heartbeat(...)
+  1: @Override
+  2: public void handleFailure(int statusCode, Object responseEntity) throws Throwable {
+  3:     super.handleFailure(statusCode, responseEntity);
+  4:     if (statusCode == 404) {
+  5:         logger.warn("{}: missing entry.", getTaskName());
+  6:         if (info != null) {
+  7:             logger.warn("{}: cannot find instance id {} and hence replicating the instance with status {}",
+  8:                     getTaskName(), info.getId(), info.getStatus());
+  9:             register(info);
+ 10:         }
+ 11:     } else if (config.shouldSyncWhenTimestampDiffers()) {
+ 12:         InstanceInfo peerInstanceInfo = (InstanceInfo) responseEntity;
+ 13:         if (peerInstanceInfo != null) {
+ 14:             syncInstancesIfTimestampDiffers(appName, id, info, peerInstanceInfo);
+ 15:         }
+ 16:     }
+ 17: }
+```
+
+- 第 4 至 10 行 ：接收到 404 状态码，调用 `#register(...)` 方法，向该被心跳同步操作失败的 Eureka-Server 发起注册**本地的应用实例**的请求。
+  - 上述 **3）** ，会使用请求参数 `overriddenStatus` 存储到 Eureka-Server 的应用实例覆盖状态集合( `AbstractInstanceRegistry.overriddenInstanceStatusMap` )，点击 [链接](https://github.com/YunaiV/eureka/blob/69993ad1e80d45c43ac8585921eca4efb88b09b9/eureka-core/src/main/java/com/netflix/eureka/resources/InstanceResource.java#L123) 查看触发条件代码位置。
+- 第 11 至 16 行 ：恰好是 **3）** 反过来的情况，本地的应用实例的 `lastDirtyTimestamp` 小于 Eureka-Server 该应用实例的，此时 Eureka-Server 返回 409 状态码，点击 [链接](https://github.com/YunaiV/eureka/blob/69993ad1e80d45c43ac8585921eca4efb88b09b9/eureka-core/src/main/java/com/netflix/eureka/resources/InstanceResource.java#L314) 查看触发条件代码位置。调用 `#syncInstancesIfTimestampDiffers()` 方法，覆盖注册本地应用实例，点击 [链接](https://github.com/YunaiV/eureka/blob/7f868f9ca715a8862c0c10cac04e238bbf371db0/eureka-core/src/main/java/com/netflix/eureka/cluster/PeerEurekaNode.java#L387) 查看方法。
+
+**记住：Eureka 通过 Heartbeat 实现 Eureka-Server 集群同步的最终一致性。**
+
+
+
+## eureka客户端与服务器的通信
+
+首先明确, 客户端只是作为HTTP的客户端就行了, 而服务器端则需要又发起请求又处理客户端或者别的节点发送过来的请求.
+
+
+
+### 客户端通信:`JserseyApplicationClient`
+
+> Low level Eureka HTTP client API.
+
+![1555053733679](images/Spring Cloud/1555053733679.png)
+
+底层使用的是Jersey框架实现的
+
+- `JserseyApplicationClient`: eureka客户端使用
+- `JerseyReplicationClient`: eureka服务器使用的HttpClient
+
+关于客户端, 只需要发起HTTP请求, 接受HTTP响应即可, 而不像server节点, 既需要发请求, 又需要处理请求.
+
+```JAVA
+    //DiscoveryClient.java中的一个私有类
+	private static final class EurekaTransport {
+        private ClosableResolver bootstrapResolver;
+        private TransportClientFactory transportClientFactory;
+
+        private EurekaHttpClient registrationClient;
+        private EurekaHttpClientFactory registrationClientFactory;
+
+        private EurekaHttpClient queryClient;
+        private EurekaHttpClientFactory queryClientFactory;
+
+        void shutdown() {
+            if (registrationClientFactory != null) {
+                registrationClientFactory.shutdown();
+            }
+
+            if (queryClientFactory != null) {
+                queryClientFactory.shutdown();
+            }
+
+            if (registrationClient != null) {
+                registrationClient.shutdown();
+            }
+
+            if (queryClient != null) {
+                queryClient.shutdown();
+            }
+
+            if (transportClientFactory != null) {
+                transportClientFactory.shutdown();
+            }
+
+            if (bootstrapResolver != null) {
+                bootstrapResolver.shutdown();
+            }
         }
     }
-
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-另外服务端的续约接口在eureka-core:1.6.2.jar的 com.netflix.eureka包下的InstanceResource类下，接口方法为renewLease()，它是REST接口。为了减少类篇幅，省略了大部分代码的展示。其中有个registry.renew()方法，即服务续约，代码如下:
-
-@PUT
-public Response renewLease(...参数省略）{
-     ...  代码省略
-    boolean isSuccess=registry.renew(app.getName(),id, isFromReplicaNode);
-       ...  代码省略
- }
-
-1
-2
-3
-4
-5
-6
-7
-读者可以跟踪registry.renew的代码一直深入研究。在这里就不再多讲述。另外服务续约有2个参数是可以配置，即Eureka Client发送续约心跳的时间参数和Eureka Server在多长时间内没有收到心跳将实例剔除的时间参数，在默认的情况下这两个参数分别为30秒和90秒，官方给的建议是不要修改，如果有特殊要求还是可以调整的，只需要分别在Eureka Client和Eureka Server修改以下参数：
-
-eureka.instance.leaseRenewalIntervalInSeconds
-eureka.instance.leaseExpirationDurationInSeconds
-
-1
-2
-3
-最后，服务注册列表的获取、服务下线和服务剔除就不在这里进行源码跟踪解读，因为和服务注册和续约类似，有兴趣的朋友可以自己看下源码，深入理解。总的来说，通过读源码，可以发现，整体架构与前面小节的eureka 的高可用架构图完全一致。
-
-Eureka Client注册一个实例为什么这么慢
-Eureka Client一启动（不是启动完成），不是立即向Eureka Server注册，它有一个延迟向服务端注册的时间，通过跟踪源码，可以发现默认的延迟时间为40秒，源码在eureka-client-1.6.2.jar的DefaultEurekaClientConfig类下，代码如下：
-public int getInitialInstanceInfoReplicationIntervalSeconds() {
-    return configInstance.getIntProperty(
-        namespace + INITIAL_REGISTRATION_REPLICATION_DELAY_KEY, 40).get();
- }
-1
-2
-3
-4
-Eureka Server的响应缓存
-Eureka Server维护每30秒更新的响应缓存,可通过更改配置eureka.server.responseCacheUpdateIntervalMs来修改。 所以即使实例刚刚注册，它也不会出现在调用/ eureka / apps REST端点的结果中。
-
-Eureka Server刷新缓存
-Eureka客户端保留注册表信息的缓存。 该缓存每30秒更新一次（如前所述）。 因 此，客户端决定刷新其本地缓存并发现其他新注册的实例可能需要30秒。
-
-LoadBalancer Refresh
-Ribbon的负载平衡器从本地的Eureka Client获取服务注册列表信息。Ribbon本身还维护本地缓存，以避免为每个请求调用本地客户端。 此缓存每30秒刷新一次（可由ribbon.ServerListRefreshInterval配置）。 所以，可能需要30多秒才能使用新注册的实例。
-
-综上几个因素，一个新注册的实例，特别是启动较快的实例（默认延迟40秒注册），不能马上被Eureka Server发现。另外，刚注册的Eureka Client也不能立即被其他服务调用，因为调用方因为各种缓存没有及时的获取到新的注册列表。
+```
 
 
 
+在`DiscoveryClient`初始化方法中, 下面两句代码进行了客户端通信的初始化:
 
+```JAVA
+            eurekaTransport = new EurekaTransport();
+			// args默认为空
+            scheduleServerEndpointTask(eurekaTransport, args);
+```
+
+```JAVA
+    private void scheduleServerEndpointTask(EurekaTransport eurekaTransport,
+                                            AbstractDiscoveryClientOptionalArgs args) {
+
+        //这些代码都是从args中取值, 因为args为空, 所以都是空值    
+        Collection<?> additionalFilters = args == null
+                ? Collections.emptyList()
+                : args.additionalFilters;
+
+        EurekaJerseyClient providedJerseyClient = args == null
+                ? null
+                : args.eurekaJerseyClient;
+        
+        TransportClientFactories argsTransportClientFactories = null;
+        if (args != null && args.getTransportClientFactories() != null) {
+            argsTransportClientFactories = args.getTransportClientFactories();
+        }
+        
+        // Ignore the raw types warnings 
+        // since the client filter interface changed between jersey 1/2
+        @SuppressWarnings("rawtypes")
+        ////相当于 transportClientFactories = new Jersey1TransportClientFactories();
+        TransportClientFactories transportClientFactories = argsTransportClientFactories == null
+                ? new Jersey1TransportClientFactories()
+                : argsTransportClientFactories;
+                
+        Optional<SSLContext> sslContext = args == null
+                ? Optional.empty()
+                : args.getSSLContext();
+        Optional<HostnameVerifier> hostnameVerifier = args == null
+                ? Optional.empty()
+                : args.getHostnameVerifier();
+
+        // If the transport factory was not supplied with args,
+        // assume they are using jersey 1 for passivity
+        // args为空, 默认被动地使用 jersey 1
+        eurekaTransport.transportClientFactory = providedJerseyClient == null
+            //相当于eurekaTransport.transportClientFactory = 
+            // 		new Jersey1TransportClientFactories().newTransportClientFactory(...)
+            //而这个方法返回了
+            //会生成MetricsCollectingEurekaHttpClient装饰的JserseyApplicationClient的工厂类
+            //见下面源码
+                ? transportClientFactories.newTransportClientFactory(clientConfig, additionalFilters, applicationInfoManager.getInfo(), sslContext, hostnameVerifier)
+                : transportClientFactories.newTransportClientFactory(additionalFilters, providedJerseyClient);
+
+        ApplicationsResolver.ApplicationsSource applicationsSource = new ApplicationsResolver.ApplicationsSource() {
+            @Override
+            public Applications getApplications(int stalenessThreshold, TimeUnit timeUnit) {
+                long thresholdInMs = TimeUnit.MILLISECONDS.convert(stalenessThreshold, timeUnit);
+                long delay = getLastSuccessfulRegistryFetchTimePeriod();
+                if (delay > thresholdInMs) {
+                    logger.info("Local registry is too stale for local lookup. Threshold:{}, actual:{}",
+                            thresholdInMs, delay);
+                    return null;
+                } else {
+                    return localRegionApps.get();
+                }
+            }
+        };
+
+        
+        //返回EurekaHttpClients中的defaultBootstrapResolver()方法结果
+        //传入的transportClientFactory并未用到
+        //bootstrapResolver用于解析并获取所有的EurekaEndpoints, 即所有eureka服务器集群节点的URL
+        eurekaTransport.bootstrapResolver = EurekaHttpClients.newBootstrapResolver(
+                clientConfig,
+                transportConfig,
+                eurekaTransport.transportClientFactory,
+                applicationInfoManager.getInfo(),
+                applicationsSource
+        );
+
+        if (clientConfig.shouldRegisterWithEureka()) {
+            EurekaHttpClientFactory newRegistrationClientFactory = null;
+            EurekaHttpClient newRegistrationClient = null;
+            try {
+                newRegistrationClientFactory = EurekaHttpClients.registrationClientFactory(
+                        eurekaTransport.bootstrapResolver,
+                        eurekaTransport.transportClientFactory,
+                        transportConfig
+                );
+                newRegistrationClient = newRegistrationClientFactory.newClient();
+            } catch (Exception e) {
+                logger.warn("Transport initialization failure", e);
+            }
+            eurekaTransport.registrationClientFactory = newRegistrationClientFactory;
+            eurekaTransport.registrationClient = newRegistrationClient;
+        }
+
+        // new method (resolve from primary servers for read)
+        // Configure new transport layer (candidate for injecting in the future)
+        if (clientConfig.shouldFetchRegistry()) {
+            EurekaHttpClientFactory newQueryClientFactory = null;
+            EurekaHttpClient newQueryClient = null;
+            try {
+                newQueryClientFactory = EurekaHttpClients.queryClientFactory(
+                        eurekaTransport.bootstrapResolver,
+                        eurekaTransport.transportClientFactory,
+                        clientConfig,
+                        transportConfig,
+                        applicationInfoManager.getInfo(),
+                        applicationsSource
+                );
+                newQueryClient = newQueryClientFactory.newClient();
+            } catch (Exception e) {
+                logger.warn("Transport initialization failure", e);
+            }
+            eurekaTransport.queryClientFactory = newQueryClientFactory;
+            eurekaTransport.queryClient = newQueryClient;
+        }
+    }
+```
+
+
+
+最后得到的`newRegistrationClientFactory`, `newQueryClientFactory`, 都会是下面方法的结果, 只不过`name`参数不同, 分析下面的源码就可以知道, 实际上最终得到的是`eurekaTransport.transportClientFactory`, 外层的`SessionedEurekaHttpClient`, `RetryableEurekaHttpClient`, `RedirectingEurekaHttpClient`都是装饰器
+
+![1555125350460](images/Spring Cloud/1555125350460.png)
+
+```java
+    //EurekaHttpClients.java
+	static EurekaHttpClientFactory canonicalClientFactory
+    (final String name,                                        
+     final EurekaTransportConfig transportConfig, 
+     final ClusterResolver<EurekaEndpoint> clusterResolver,
+     final TransportClientFactory transportClientFactory) {
+
+        return new EurekaHttpClientFactory() {
+            @Override
+            public EurekaHttpClient newClient() {
+                return new SessionedEurekaHttpClient(
+                        name,
+                        RetryableEurekaHttpClient.createFactory(
+                                name,
+                                transportConfig,
+                                clusterResolver,
+                                RedirectingEurekaHttpClient.createFactory(transportClientFactory),
+                                ServerStatusEvaluators.legacyEvaluator()),
+                        transportConfig.getSessionedClientReconnectIntervalSeconds() * 1000
+                );
+            }
+
+            @Override
+            public void shutdown() {
+                wrapClosable(clusterResolver).shutdown();
+            }
+        };
+    }
+
+```
+
+而外层的`MetricsCollectingEurekaHttpClient`也是装饰器, 所以总共包装了四层
+
+```java
+    @Override
+    public TransportClientFactory newTransportClientFactory
+    		(EurekaClientConfig clientConfig,
+            Collection<ClientFilter> additionalFilters,
+            InstanceInfo myInstanceInfo, 
+            Optional<SSLContext> sslContext,
+            Optional<HostnameVerifier> hostnameVerifier) {
+        
+        //返回一个JserseyApplicationClient
+        final TransportClientFactory jerseyFactory = JerseyEurekaHttpClientFactory.create(
+                clientConfig,
+                additionalFilters,
+                myInstanceInfo,
+                new EurekaClientIdentity(myInstanceInfo.getIPAddr()),
+                sslContext,
+                hostnameVerifier
+        );
+        
+        //用MetricsCollectingEurekaHttpClient包装JserseyApplicationClient
+        final TransportClientFactory metricsFactory = 
+            MetricsCollectingEurekaHttpClient.createFactory(jerseyFactory);
+
+        return new TransportClientFactory() {
+            @Override
+            public EurekaHttpClient newClient(EurekaEndpoint serviceUrl) {
+                //返回MetricsCollectingEurekaHttpClient
+                return metricsFactory.newClient(serviceUrl);
+            }
+
+            @Override
+            public void shutdown() {
+                metricsFactory.shutdown();
+                jerseyFactory.shutdown();
+            }
+        };
+    }
+```
+
+![1555126284656](images/Spring Cloud/1555126284656.png)
+
+而最后的最后, `JserseyApplicationClient`还是把通信部分代理给了Apache httpclient
+
+![1555126426551](images/Spring Cloud/1555126426551.png)
+
+从下面可见,  `JerseyApplicationClient`的大多数功能还是由`AbstractJerseyEurekaHttpClient`实现的
+
+```JAVA
+public class JerseyApplicationClient extends AbstractJerseyEurekaHttpClient {
+
+    private final Map<String, String> additionalHeaders;
+
+    public JerseyApplicationClient(Client jerseyClient, String serviceUrl, Map<String, String> additionalHeaders) {
+        super(jerseyClient, serviceUrl);
+        this.additionalHeaders = additionalHeaders;
+    }
+
+    @Override
+    protected void addExtraHeaders(Builder webResource) {
+        if (additionalHeaders != null) {
+            for (String key : additionalHeaders.keySet()) {
+                webResource.header(key, additionalHeaders.get(key));
+            }
+        }
+    }
+}
+```
+
+姑且来看一下这个抽象方法里的所有功能: 
+
+![1555126851258](images/Spring Cloud/1555126851258.png)
+
+`fetchRegistry()`的最终归宿是Apache的HttpClient
+
+![1555124232339](images/Spring Cloud/1555124232339.png)
+
+![1555123940804](images/Spring Cloud/1555123940804.png)
+
+
+
+### 服务器端通信
+
+`JerseyReplicationClient`是eureka服务器使用的HttpClient, 直接new出来的不再赘述, 而且整个类的构造和上面
+
+的很像.
+
+而在接收客户端以及别的节点的请求, 使用的是javax注解 + jersey框架.
+
+#### 接收客户端注册请求的代码`ApplicationResource`
+
+![1555146081293](images/Spring Cloud/1555146081293.png)
+
+```JAVA
+@Produces({"application/xml", "application/json"})
+public class ApplicationResource {
+    @POST
+    @Consumes({"application/json", "application/xml"})
+    public Response addInstance(InstanceInfo info,
+                                @HeaderParam(PeerEurekaNode.HEADER_REPLICATION)
+                                String isReplication) {
+        logger.debug("Registering instance {} (replication={})", info.getId(), isReplication);
+        // validate that the instanceinfo contains all the necessary required fields
+        if (isBlank(info.getId())) {
+            return Response.status(400).entity("Missing instanceId").build();
+        } else if (isBlank(info.getHostName())) {
+            return Response.status(400).entity("Missing hostname").build();
+        } else if (isBlank(info.getIPAddr())) {
+            return Response.status(400).entity("Missing ip address").build();
+        } else if (isBlank(info.getAppName())) {
+            return Response.status(400).entity("Missing appName").build();
+        } else if (!appName.equals(info.getAppName())) {
+            return Response.status(400).entity("Mismatched appName, expecting " + appName + " but was " + info.getAppName()).build();
+        } else if (info.getDataCenterInfo() == null) {
+            return Response.status(400).entity("Missing dataCenterInfo").build();
+        } else if (info.getDataCenterInfo().getName() == null) {
+            return Response.status(400).entity("Missing dataCenterInfo Name").build();
+        }
+
+        // handle cases where clients may be registering with bad DataCenterInfo with missing data
+        DataCenterInfo dataCenterInfo = info.getDataCenterInfo();
+        if (dataCenterInfo instanceof UniqueIdentifier) {
+            String dataCenterInfoId = ((UniqueIdentifier) dataCenterInfo).getId();
+            if (isBlank(dataCenterInfoId)) {
+                boolean experimental = "true".equalsIgnoreCase(serverConfig.getExperimental("registration.validation.dataCenterInfoId"));
+                if (experimental) {
+                    String entity = "DataCenterInfo of type " + dataCenterInfo.getClass() + " must contain a valid id";
+                    return Response.status(400).entity(entity).build();
+                } else if (dataCenterInfo instanceof AmazonInfo) {
+                    AmazonInfo amazonInfo = (AmazonInfo) dataCenterInfo;
+                    String effectiveId = amazonInfo.get(AmazonInfo.MetaDataKey.instanceId);
+                    if (effectiveId == null) {
+                        amazonInfo.getMetadata().put(AmazonInfo.MetaDataKey.instanceId.getName(), info.getId());
+                    }
+                } else {
+                    logger.warn("Registering DataCenterInfo of type {} without an appropriate id", dataCenterInfo.getClass());
+                }
+            }
+        }
+
+        registry.register(info, "true".equals(isReplication));
+        return Response.status(204).build();  // 204 to be backwards compatible
+    }
+}
+```
+
+#### 接收服务器端复制请求的代码`PeerReplicationResource`
+
+![1555146968928](images/Spring Cloud/1555146968928.png)
+
+> Process batched replication events from peer eureka nodes.
+> The batched events are delegated to underlying resources to generate a ReplicationListResponse containing the individual responses to the batched events
+
+```JAVA
+@Path("/{version}/peerreplication")
+@Produces({"application/xml", "application/json"})
+public class PeerReplicationResource {
+	@Path("batch")
+    @POST
+    public Response batchReplication(ReplicationList replicationList) {
+        try {
+            ReplicationListResponse batchResponse = new ReplicationListResponse();
+            for (ReplicationInstance instanceInfo : replicationList.getReplicationList()) {
+                try {
+                    //在dispatch(instanceInfo)中进行处理
+                    batchResponse.addResponse(dispatch(instanceInfo));
+                } catch (Exception e) {
+                    batchResponse.addResponse
+                        (new ReplicationInstanceResponse
+                         (Status.INTERNAL_SERVER_ERROR.getStatusCode(), null));
+                    logger.error("{} request processing failed for batch item {}/{}",
+                            instanceInfo.getAction(), instanceInfo.getAppName(), 
+                                 instanceInfo.getId(), e);
+                }
+            }
+            return Response.ok(batchResponse).build();
+        } catch (Throwable e) {
+            logger.error("Cannot execute batch Request", e);
+            return Response.status(Status.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+}
+```
+
+
+
+# 负载均衡 RIBBON
 
 
 
