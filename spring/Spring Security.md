@@ -794,9 +794,13 @@ public class AuthenticationConfiguration {
 
 ### TODO 拦截器链的执行流程
 
+应该包含几个重要的拦截器链的过滤流程和顺序.
+
 
 
 ### TODO Oauth2组件与`@EnableAuthorizationServer`
+
+应该包含
 
 
 
@@ -1642,7 +1646,7 @@ PONG
 	}
 ```
 
-### JWT (Json Web Token)
+### JWT (Json Web Token) 简介
 
 JWT, 顾名思义, 是一种token的结构定义.
 
@@ -1736,11 +1740,13 @@ HMACSHA256(
 
 
 
-## TODO 微服务下的认证
+## 资源服务器与@EnableResourceServer
 
 
 
-## 注意事项
+
+
+# 注意事项
 
 #### 1. scope
 
