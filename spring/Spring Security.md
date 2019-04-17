@@ -1740,9 +1740,179 @@ HMACSHA256(
 
 
 
-## 资源服务器与@EnableResourceServer
+## Feign 与 Oauth2
+
+在使用 clientCredentials 模式验证微服务同时使用Feign作为Http客户端用来发起HTTP请求时, 可以使用`OAuth2FeignRequestInterceptor`来进行下面的操作:
+
+- 将微服务的请求拦截
+- 从Oauth2上下文中获取token
+- Oauth2上下文中无token, 使用`RestTemplate`向`security.oauth2.client`配置的URL请求token
+- 把新token添加到`OAuth2ClientContext`中
+- 添加token到header
+- 发送请求
+
+```JAVA
+@Configuration
+public class Oauth2ClientConfig {
+
+    @Bean
+    @ConfigurationProperties(prefix = "security.oauth2.client")
+    public ClientCredentialsResourceDetails clientCredentialsResourceDetails() {
+        return new ClientCredentialsResourceDetails();
+    }
+
+    @Bean
+    public RequestInterceptor oauth2FeignRequestInterceptor() {
+        return new OAuth2FeignRequestInterceptor(new DefaultOAuth2ClientContext(), clientCredentialsResourceDetails());
+    }
+}
+```
 
 
+
+## 资源服务器与`@EnableResourceServer`
+
+- HTTP安全配置在`ResourceServerConfigurerAdapter`子类中, 在`WebSecurityConfigurerAdapter`无效!!!
+- 可以使用`@EnableGlobalMethodSecurity(prePostEnabled = true)`来激活controller端点的注解安全配置, 而且Pre是在最后一个`Filter` !!
+
+
+
+### 认证
+
+`@EnableResourceServer` 引入了一个filter `OAuth2AuthenticationProcessingFilter` 来拦截请求, 认证请求中的token.
+
+#### `OAuth2AuthenticationProcessingFilter` 
+
+```java
+	public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException,
+			ServletException {
+
+		final boolean debug = logger.isDebugEnabled();
+		final HttpServletRequest request = (HttpServletRequest) req;
+		final HttpServletResponse response = (HttpServletResponse) res;
+
+		try {
+
+            //抽取认证信息
+			Authentication authentication = tokenExtractor.extract(request);
+			
+			if (authentication == null) {
+				if (stateless && isAuthenticated()) {
+					if (debug) {
+						logger.debug("Clearing security context.");
+					}
+					SecurityContextHolder.clearContext();
+				}
+				if (debug) {
+					logger.debug("No token in request, will continue chain.");
+				}
+			}
+			else {
+				request.setAttribute(OAuth2AuthenticationDetails.ACCESS_TOKEN_VALUE, authentication.getPrincipal());
+				if (authentication instanceof AbstractAuthenticationToken) {
+					AbstractAuthenticationToken needsDetails = (AbstractAuthenticationToken) authentication;
+					needsDetails.setDetails(authenticationDetailsSource.buildDetails(request));
+				}
+                //代理给OAuth2AuthenticationManager
+				Authentication authResult = authenticationManager.authenticate(authentication);
+
+				if (debug) {
+					logger.debug("Authentication success: " + authResult);
+				}
+
+				eventPublisher.publishAuthenticationSuccess(authResult);
+				SecurityContextHolder.getContext().setAuthentication(authResult);
+
+			}
+		}
+		catch (OAuth2Exception failed) {
+			SecurityContextHolder.clearContext();
+
+			if (debug) {
+				logger.debug("Authentication request failed: " + failed);
+			}
+			eventPublisher.publishAuthenticationFailure(new BadCredentialsException(failed.getMessage(), failed),
+					new PreAuthenticatedAuthenticationToken("access-token", "N/A"));
+
+			authenticationEntryPoint.commence(request, response,
+					new InsufficientAuthenticationException(failed.getMessage(), failed));
+
+			return;
+		}
+
+		chain.doFilter(request, response);
+	}
+```
+
+#### OAuth2AuthenticationManager
+
+```java
+public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+
+   if (authentication == null) {
+      throw new InvalidTokenException("Invalid token (token not found)");
+   }
+   String token = (String) authentication.getPrincipal();
+    //代理给ResourceServerTokenServices
+   OAuth2Authentication auth = tokenServices.loadAuthentication(token);
+   if (auth == null) {
+      throw new InvalidTokenException("Invalid token: " + token);
+   }
+
+   Collection<String> resourceIds = auth.getOAuth2Request().getResourceIds();
+   if (resourceId != null && resourceIds != null && !resourceIds.isEmpty() && !resourceIds.contains(resourceId)) {
+      throw new OAuth2AccessDeniedException("Invalid token does not contain resource id (" + resourceId + ")");
+   }
+
+   checkClientDetails(auth);
+
+   if (authentication.getDetails() instanceof OAuth2AuthenticationDetails) {
+      OAuth2AuthenticationDetails details = (OAuth2AuthenticationDetails) authentication.getDetails();
+      // Guard against a cached copy of the same details
+      if (!details.equals(auth.getDetails())) {
+         // Preserve the authentication details from the one loaded by token services
+         details.setDecodedDetails(auth.getDetails());
+      }
+   }
+   auth.setDetails(authentication.getDetails());
+   auth.setAuthenticated(true);
+   return auth;
+
+}
+```
+
+
+
+### 授权
+
+通常和`@EnableGlobalMethodSecurity(prePostEnabled = true)`搭配, 来对 controller 的 endpoint 进行安全防护.
+
+这样就不需要继承 `ResourceServerConfigurerAdapter` 来进行安全配置.
+
+其实`ResourceServerConfigurerAdapter`还是在中间的一个Filter中 (晚于Oauth2认证filter) 使用`GlobalMethodSecurity`的相关spEL表达式.
+
+而`GlobalMethodSecurity`使用的CGLIB
+
+```java
+@RestController
+public class UserController {
+
+    private final AuthServiceClient authServiceClient;
+
+    public UserController(AuthServiceClient authServiceClient) {
+        this.authServiceClient = authServiceClient;
+        authServiceClient.user();
+    }
+
+    //使用PreAuthorize来认证OAUTH2和它的scope或者role等
+    //方法在OAuth2SecurityExpressionMethods中
+    @PreAuthorize("#oauth2.throwOnError(#oauth2.hasScope('read') or (#oauth2.hasScope('other') and hasRole('ROLE_USER'))")
+    @GetMapping("/")
+    public User user() {
+        return authServiceClient.user();
+    }
+}
+```
 
 
 
@@ -1755,4 +1925,30 @@ HMACSHA256(
 #### 2. spring security 的 token获取机制
 
 相同的用户和客户端两次获取token, 如果相差时间没有超过第一次获取token时的失效时间, 返回的将是相同的token.
+
+#### 3. role 与 authority
+
+- 在spring security 中, 二者都是字符串
+- role 是 authority 前面加上  "`ROLE_`" 前缀
+
+#### 4. `#oauth2.clientHasRole('ROLE_USER')` 与 `hasRole('ROLE_USER')` 不同
+
+-  `hasRole('ROLE_USER')` 在基本安全类中对`Oauth2Authenticaton.Authority`认证.
+- `#oauth2.clientHasRole('ROLE_USER')`在oauth2类中对`Oauth2Authenticaton.Oauth2Request.Authority`, 就是说, 看看请求中除了token之外, 有没有认证信息可以说明这个客户端是拥有`ROLE_USER`角色的
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -1247,21 +1247,31 @@ class InstanceInfoReplicator implements Runnable {
 
 ### eureka服务器最终一致性原理
 
-- Eureka-Server 是允许**同一时刻**在任意节点被 Eureka-Client 发起**写入**相关的操作
-- 网络是不可靠的资源，Eureka-Client 可能向一个 Eureka-Server 注册成功，但是网络波动，导致 Eureka-Client 误以为失败，此时恰好 Eureka-Client 变更了应用实例的状态，重试向另一个 Eureka-Server 注册，那么两个 Eureka-Server 对该应用实例的状态产生冲突。
+Eureka-Server 是允许**同一时刻**在任意节点被 Eureka-Client 发起**写入**相关的操作
+
+网络是不可靠的资源，Eureka-Client 可能向一个 Eureka-Server 注册成功，但是网络波动，导致 Eureka-Client 误以为失败，此时恰好 Eureka-Client 变更了应用实例的状态，重试向另一个 Eureka-Server 注册，那么两个 Eureka-Server 对该应用实例的状态产生冲突。
 
 网络波动真的很复杂。我们来看看 Eureka 是怎么处理的。
 
-应用实例( InstanceInfo ) 的 `lastDirtyTimestamp` 属性，使用**时间戳**，表示应用实例的**版本号**，当请求方( 不仅仅是 Eureka-Client ，也可能是同步注册操作的 Eureka-Server ) 向 Eureka-Server 发起注册时，若 Eureka-Server 已存在拥有更大 `lastDirtyTimestamp` 该实例( **相同应用并且相同应用实例编号被认为是相同实例** )，则请求方注册的应用实例( InstanceInfo ) 无法覆盖注册此 Eureka-Server 的该实例( 见 `AbstractInstanceRegistry#register(...)` 方法 )。
+应用实例( InstanceInfo ) 的 `lastDirtyTimestamp` 属性，使用**时间戳**，表示应用实例的**版本号**
 
-因为应用实例状态变更时，设置 `lastDirtyTimestamp` 为当前时间，见`ApplicationInfoManager#setInstanceStatus(status)` 方法 。
+- 当请求方( 不仅仅是 Eureka-Client ，也可能是同步注册操作的 Eureka-Server ) 向 Eureka-Server 发起注册时，若 Eureka-Server 已存在拥有更大 `lastDirtyTimestamp` 该实例( **相同应用并且相同应用实例编号被认为是相同实例** )，则请求方注册的应用实例( InstanceInfo ) 无法覆盖注册此 Eureka-Server 的该实例( 见 `AbstractInstanceRegistry#register(...)` 方法 )。
+- 应用实例状态变更时，设置 `lastDirtyTimestamp` 为当前时间，见`ApplicationInfoManager#setInstanceStatus(status)` 方法 。
 
-但是光靠**注册**请求判断 `lastDirtyTimestamp` 显然是不够的，因为网络异常情况下时，同步操作任务多次执行失败到达过期时间后，此时在 Eureka-Server 集群同步起到最终一致性**最**关键性出现了：Heartbeat 。因为 Heartbeat 会周期性的执行，通过它一方面可以判断 Eureka-Server 是否存在心跳对应的应用实例，另外一方面可以比较应用实例的 `lastDirtyTimestamp` 。当满足下面任意条件，Eureka-Server 返回 404 状态码：
+但是光靠**注册**请求判断 `lastDirtyTimestamp` 显然是不够的，因为网络异常情况下时，同步操作任务多次执行失败到达过期时间后，此时在 Eureka-Server 集群同步起到最终一致性**最**关键性出现了：Heartbeat 。
 
-- 1）Eureka-Server 应用实例不存在。
+先上调用栈:
+
+![1555292894868](images/Spring Cloud/1555292894868.png)
+
+心跳包的传播:
+
+> Send the heartbeat information of an instance to the node represented by this class. If the instance does not exist the node, the instance registration information is sent again to the peer node.
 
 ```JAVA
-    public void heartbeat(final String appName, final String id,
+//PeerEurekaNode.java
+
+	public void heartbeat(final String appName, final String id,
                           final InstanceInfo info, final InstanceStatus overriddenStatus,
                           boolean primeConnection) throws Throwable {
         if (primeConnection) {
@@ -1283,8 +1293,10 @@ class InstanceInfoReplicator implements Runnable {
                     if (info != null) {
                         logger.warn("{}: cannot find instance id {} and hence replicating the instance with status {}",
                                 getTaskName(), info.getId(), info.getStatus());
+                        //状态404且InstanceInfo不为空, 会对这个实例进行注册
                         register(info);
                     }
+                //状态409, 会对这个实例进行更新
                 } else if (config.shouldSyncWhenTimestampDiffers()) {
                     InstanceInfo peerInstanceInfo = (InstanceInfo) responseEntity;
                     if (peerInstanceInfo != null) {
@@ -1298,12 +1310,154 @@ class InstanceInfoReplicator implements Runnable {
     }
 ```
 
+因为 Heartbeat 会周期性的执行，通过它一方面可以判断 Eureka-Server 是否存在心跳对应的应用实例，另外一方面可以比较应用实例的 `lastDirtyTimestamp` 。
 
+当满足下面任意条件，Eureka-Server 返回 404 状态码：
+
+- 1）Eureka-Server 应用实例不存在。
 
 - 2）Eureka-Server 应用实例状态为 `UNKNOWN`。
-- 3）请求的 `lastDirtyTimestamp` 更大。
 
-请求方接收到 404 状态码返回后，**认为 Eureka-Server 应用实例实际是不存在的**，重新发起应用实例的注册。以本文的 Heartbeat 为例子，代码如下：
+- 3）请求的 `lastDirtyTimestamp` 大于本地注册表的时间戳
+
+  `lastDirtyTimestamp > appInfo.getLastDirtyTimestamp()`。
+
+另外, 下面的情况Eureka-Server 返回 409 状态码：
+
+- 请求的 `lastDirtyTimestamp` 小于本地注册表的时间戳, 而且是对等节点的复制请求。
+
+  `appInfo.getLastDirtyTimestamp() > lastDirtyTimestamp && isReplication`
+
+其他情况下, 返回 200 OK.
+
+```JAVA
+//AbstractInstanceRegistry.java    
+	public boolean renew(String appName, String id, boolean isReplication) {
+        RENEW.increment(isReplication);
+        Map<String, Lease<InstanceInfo>> gMap = registry.get(appName);
+        Lease<InstanceInfo> leaseToRenew = null;
+        if (gMap != null) {
+            leaseToRenew = gMap.get(id);
+        }
+        //租约不存在
+        if (leaseToRenew == null) {
+            RENEW_NOT_FOUND.increment(isReplication);
+            logger.warn("DS: Registry: lease doesn't exist, registering resource: {} - {}", appName, id);
+            return false;
+        } else {
+            InstanceInfo instanceInfo = leaseToRenew.getHolder();
+            if (instanceInfo != null) {
+                // touchASGCache(instanceInfo.getASGName());
+                InstanceStatus overriddenInstanceStatus = this.getOverriddenInstanceStatus(
+                        instanceInfo, leaseToRenew, isReplication);
+                //将要更新的实例状态为UNKNOWN
+                if (overriddenInstanceStatus == InstanceStatus.UNKNOWN) {
+                    logger.info("Instance status UNKNOWN possibly due to deleted override for instance {}"
+                            + "; re-register required", instanceInfo.getId());
+                    RENEW_NOT_FOUND.increment(isReplication);
+                    return false;
+                }
+                if (!instanceInfo.getStatus().equals(overriddenInstanceStatus)) {
+                    logger.info(
+                            "The instance status {} is different from overridden instance status {} for instance {}. "
+                                    + "Hence setting the status to overridden status", instanceInfo.getStatus().name(),
+                                    instanceInfo.getOverriddenStatus().name(),
+                                    instanceInfo.getId());
+                    instanceInfo.setStatusWithoutDirty(overriddenInstanceStatus);
+
+                }
+            }
+            renewsLastMin.increment();
+            leaseToRenew.renew();
+            return true;
+        }
+    }
+
+```
+
+```java
+//InstanceResource.java
+    @PUT
+    public Response renewLease(
+            @HeaderParam(PeerEurekaNode.HEADER_REPLICATION) String isReplication,
+            @QueryParam("overriddenstatus") String overriddenStatus,
+            @QueryParam("status") String status,
+            @QueryParam("lastDirtyTimestamp") String lastDirtyTimestamp) {
+        boolean isFromReplicaNode = "true".equals(isReplication);
+        //这里调用的是上面的代码
+        boolean isSuccess = registry.renew(app.getName(), id, isFromReplicaNode);
+
+        // Not found in the registry, immediately ask for a register
+        //返回前两种404
+        if (!isSuccess) {
+            logger.warn("Not Found (Renew): {} - {}", app.getName(), id);
+            return Response.status(Status.NOT_FOUND).build();
+        }
+        
+        //从这里往下是认证时间戳代码
+        // Check if we need to sync based on dirty time stamp, the client
+        // instance might have changed some value
+        Response response;
+        if (lastDirtyTimestamp != null && serverConfig.shouldSyncWhenTimestampDiffers()) {
+            //认证时间戳, 见下
+            response = this.validateDirtyTimestamp(Long.valueOf(lastDirtyTimestamp), isFromReplicaNode);
+            // Store the overridden status since the validation found out the node that replicates wins
+            if (response.getStatus() == Response.Status.NOT_FOUND.getStatusCode()
+                    && (overriddenStatus != null)
+                    && !(InstanceStatus.UNKNOWN.name().equals(overriddenStatus))
+                    && isFromReplicaNode) {
+                registry.storeOverriddenStatusIfRequired(app.getAppName(), id, InstanceStatus.valueOf(overriddenStatus));
+            }
+        } else {
+            response = Response.ok().build();
+        }
+        logger.debug("Found (Renew): {} - {}; reply status={}", app.getName(), id, response.getStatus());
+        return response;
+    }
+```
+
+```JAVA
+    private Response validateDirtyTimestamp(Long lastDirtyTimestamp,
+                                            boolean isReplication) {
+        InstanceInfo appInfo = registry.getInstanceByAppAndId(app.getName(), id, false);
+        if (appInfo != null) {
+            if ((lastDirtyTimestamp != null) && (!lastDirtyTimestamp.equals(appInfo.getLastDirtyTimestamp()))) {
+                Object[] args = {id, appInfo.getLastDirtyTimestamp(), lastDirtyTimestamp, isReplication};
+
+                if (lastDirtyTimestamp > appInfo.getLastDirtyTimestamp()) {
+                    logger.debug(
+                            "Time to sync, since the last dirty timestamp differs -"
+                                    + " ReplicationInstance id : {},Registry : {} Incoming: {} Replication: {}",
+                            args);
+                    //返回404
+                    return Response.status(Status.NOT_FOUND).build();
+                } else if (appInfo.getLastDirtyTimestamp() > lastDirtyTimestamp) {
+                    // In the case of replication, send the current instance info in the registry for the
+                    // replicating node to sync itself with this one.
+                    if (isReplication) {
+                        logger.debug(
+                                "Time to sync, since the last dirty timestamp differs -"
+                                        + " ReplicationInstance id : {},Registry : {} Incoming: {} Replication: {}",
+                                args);
+                        //返回409
+                        return Response.status(Status.CONFLICT).entity(appInfo).build();
+                    } else {
+                        return Response.ok().build();
+                    }
+                }
+            }
+
+        }
+        return Response.ok().build();
+    }
+```
+
+
+
+- 请求方接收到 404 状态码返回后，**认为对方注册表上应用实例是不存在或者过期的，重新发起应用实例的注册。**
+- 请求方接收到 409 CONFLICT 状态码后, **认为本节点上该实例的注册表信息已经失效了, 所以需要syncInstancesIfTimestampDiffers(), 将返回的实例信息同步到自己节点.**
+
+代码如下：
 
 ```java
 // PeerEurekaNode#heartbeat(...)
@@ -1326,9 +1480,8 @@ class InstanceInfoReplicator implements Runnable {
  17: }
 ```
 
-- 第 4 至 10 行 ：接收到 404 状态码，调用 `#register(...)` 方法，向该被心跳同步操作失败的 Eureka-Server 发起注册**本地的应用实例**的请求。
-  - 上述 **3）** ，会使用请求参数 `overriddenStatus` 存储到 Eureka-Server 的应用实例覆盖状态集合( `AbstractInstanceRegistry.overriddenInstanceStatusMap` )，点击 [链接](https://github.com/YunaiV/eureka/blob/69993ad1e80d45c43ac8585921eca4efb88b09b9/eureka-core/src/main/java/com/netflix/eureka/resources/InstanceResource.java#L123) 查看触发条件代码位置。
-- 第 11 至 16 行 ：恰好是 **3）** 反过来的情况，本地的应用实例的 `lastDirtyTimestamp` 小于 Eureka-Server 该应用实例的，此时 Eureka-Server 返回 409 状态码，点击 [链接](https://github.com/YunaiV/eureka/blob/69993ad1e80d45c43ac8585921eca4efb88b09b9/eureka-core/src/main/java/com/netflix/eureka/resources/InstanceResource.java#L314) 查看触发条件代码位置。调用 `#syncInstancesIfTimestampDiffers()` 方法，覆盖注册本地应用实例，点击 [链接](https://github.com/YunaiV/eureka/blob/7f868f9ca715a8862c0c10cac04e238bbf371db0/eureka-core/src/main/java/com/netflix/eureka/cluster/PeerEurekaNode.java#L387) 查看方法。
+- 第 4 至 10 行 ：接收到 404 状态码，调用 `#register(...)` 方法，向该被心跳同步操作失败的 Eureka-Server 发起注册**本地的应用实例**的请求。会使用请求参数 `overriddenStatus` 存储到 Eureka-Server 的应用实例覆盖状态集合( `AbstractInstanceRegistry.overriddenInstanceStatusMap` )。
+- 第 11 至 16 行 ：本地的应用实例的 `lastDirtyTimestamp` 小于 Eureka-Server 该应用实例的，此时 Eureka-Server 返回 409 状态码。调用 `#syncInstancesIfTimestampDiffers()` 方法，覆盖注册本地应用实例。
 
 **记住：Eureka 通过 Heartbeat 实现 Eureka-Server 集群同步的最终一致性。**
 
@@ -1340,7 +1493,7 @@ class InstanceInfoReplicator implements Runnable {
 
 
 
-### 客户端通信:`JserseyApplicationClient`
+### 客户端通信:`JerseyApplicationClient`
 
 > Low level Eureka HTTP client API.
 
@@ -1349,7 +1502,7 @@ class InstanceInfoReplicator implements Runnable {
 底层使用的是Jersey框架实现的
 
 - `JserseyApplicationClient`: eureka客户端使用
-- `JerseyReplicationClient`: eureka服务器使用的HttpClient
+- `JerseyReplicationClient`: eureka服务器使用
 
 关于客户端, 只需要发起HTTP请求, 接受HTTP响应即可, 而不像server节点, 既需要发请求, 又需要处理请求.
 
@@ -1644,7 +1797,7 @@ public class JerseyApplicationClient extends AbstractJerseyEurekaHttpClient {
 
 而在接收客户端以及别的节点的请求, 使用的是javax注解 + jersey框架.
 
-#### 接收客户端注册请求的代码`ApplicationResource`
+#### 接收客户端请求`ApplicationResource` 与 `InstanceResource`
 
 ![1555146081293](images/Spring Cloud/1555146081293.png)
 
@@ -1701,9 +1854,15 @@ public class ApplicationResource {
 }
 ```
 
-#### 接收服务器端复制请求的代码`PeerReplicationResource`
+#### 接收对等节点请求`PeerReplicationResource`
+
+先举两个例子: 
 
 ![1555146968928](images/Spring Cloud/1555146968928.png)
+
+![1555292894868](images/Spring Cloud/1555292894868.png)
+
+看看源码:
 
 > Process batched replication events from peer eureka nodes.
 > The batched events are delegated to underlying resources to generate a ReplicationListResponse containing the individual responses to the batched events
@@ -1741,7 +1900,243 @@ public class PeerReplicationResource {
 
 
 
+# HTTP客户端 FEIGN
+
+太简单了, 一看下面的调用栈便知, 通过JDK动态代理来发起自定义的请求.
+
+### `RequestInterceptor`
+
+`RequestInterceptor`是请求拦截器, 可用于Oauth2认证, 它使用的是 `RestTemplate`, `RestTemplate` 使用 `java.net`
+
+![1555415898772](images/Spring Cloud/1555415898772.png)
+
+
+
+拦截之后, 对请求做一些改动, 使用RIBBON从注册表信息中解析目标URL, 见下
+
+
+
 # 负载均衡 RIBBON
+
+![1555300525306](images/Spring Cloud/1555300525306.png)
+
+​						----	中间调用栈省略		----
+
+![1555300557117](images/Spring Cloud/1555300557117.png)
+
+
+
+### RIBBON做了什么?
+
+**解析最终URI, 改变请求中的URI, 请求并响应**
+
+体现RIBBON作用的关键逻辑, 就在上面的调用栈里面的一个类:
+
+```java
+//AbstractLoadBalancerAwareClient.java
+
+	//注意到T实际上是Response类型
+    public T executeWithLoadBalancer(final S request, final IClientConfig requestConfig) throws ClientException {
+        LoadBalancerCommand<T> command = buildLoadBalancerCommand(request, requestConfig);
+
+        try {
+            return command.submit(
+                new ServerOperation<T>() {
+                    @Override
+                    //传入的Server是已经解析好的
+                    public Observable<T> call(Server server) {
+                        //根据server改变请求中的URI
+                        URI finalUri = reconstructURIWithServer(server, request.getUri());
+                        S requestForServer = (S) request.replaceUri(finalUri);
+                        try {
+                            return 
+                               //调用客户端来发起请求, 返回响应
+                                Observable.just
+                                (AbstractLoadBalancerAwareClient.this.execute
+                                 (requestForServer, requestConfig));
+                        } 
+                        catch (Exception e) {
+                            return Observable.error(e);
+                        }
+                    }
+                })
+                .toBlocking()
+                .single();
+        } catch (Exception e) {
+            Throwable t = e.getCause();
+            if (t instanceof ClientException) {
+                throw (ClientException) t;
+            } else {
+                throw new ClientException(e);
+            }
+        }
+        
+    }
+```
+
+**上面的代码可知, 最终的HTTP请求和响应是由RIBBON处理的!!!** 
+
+用的是`java.net`, 没有用 `RestTemplate`
+
+### 从哪里获取Server信息?
+
+![1555300525306](images/Spring Cloud/1555300525306.png)
+
+在`LoadBalancerContext#getServerFromLoadBalancer()`中的关键代码:
+
+```JAVA
+	//获取上下文(LoadBalancerContext)中的ILoadBalancer
+	ILoadBalancer lb = getLoadBalancer();
+        if (host == null) {
+            // Partial URI or no URI Case
+            // well we have to just get the right instances from lb - or we fall back
+            if (lb != null){
+                //关键调用, 从ILoadBalancer获取server
+                Server svc = lb.chooseServer(loadBalancerKey);
+                if (svc == null){
+                    throw new ClientException(ClientException.ErrorType.GENERAL,
+                            "Load balancer does not have available server for client: "
+                                    + clientName);
+                }
+                host = svc.getHost();
+                if (host == null){
+                    throw new ClientException(ClientException.ErrorType.GENERAL,
+                            "Invalid Server for :" + svc);
+                }
+                logger.debug("{} using LB returned Server: {} for request {}", new Object[]{clientName, svc, original});
+                return svc;
+```
+
+![1555301017734](images/Spring Cloud/1555301017734.png)
+
+```JAVA
+//ZoneAwareLoadBalancer.java
+	@Override
+    public Server chooseServer(Object key) {
+        //没有启用ZoneAware 或者 zone只有一个
+        if (!ENABLED.get() || getLoadBalancerStats().getAvailableZones().size() <= 1) {
+            logger.debug("Zone aware logic disabled or there is only one zone");
+            //调用DynamicServerListLoadBalancer的对应方法
+            return super.chooseServer(key);
+        }
+        Server server = null;
+        try {
+            LoadBalancerStats lbStats = getLoadBalancerStats();
+            Map<String, ZoneSnapshot> zoneSnapshot = ZoneAvoidanceRule.createSnapshot(lbStats);
+            logger.debug("Zone snapshots: {}", zoneSnapshot);
+            if (triggeringLoad == null) {
+                triggeringLoad = DynamicPropertyFactory.getInstance().getDoubleProperty(
+                        "ZoneAwareNIWSDiscoveryLoadBalancer." + this.getName() + ".triggeringLoadPerServerThreshold", 0.2d);
+            }
+
+            if (triggeringBlackoutPercentage == null) {
+                triggeringBlackoutPercentage = DynamicPropertyFactory.getInstance().getDoubleProperty(
+                        "ZoneAwareNIWSDiscoveryLoadBalancer." + this.getName() + ".avoidZoneWithBlackoutPercetage", 0.99999d);
+            }
+            //从zoneSnapshot中按照ZoneAvoidanceRule规则得到availableZones
+            Set<String> availableZones = ZoneAvoidanceRule.getAvailableZones(zoneSnapshot, triggeringLoad.get(), triggeringBlackoutPercentage.get());
+            logger.debug("Available zones: {}", availableZones);
+            if (availableZones != null &&  availableZones.size() < zoneSnapshot.keySet().size()) {
+                //从availableZones中随机选取一个zone
+                String zone = ZoneAvoidanceRule.randomChooseZone(zoneSnapshot, availableZones);
+                logger.debug("Zone chosen: {}", zone);
+                if (zone != null) {
+                    //获取到这个zone对应的zoneLoadBalancer
+                    BaseLoadBalancer zoneLoadBalancer = getLoadBalancer(zone);
+                    //仍然是BaseLoadBalancer.chooseServer(key)
+                    server = zoneLoadBalancer.chooseServer(key);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error choosing server using zone aware logic for load balancer={}", name, e);
+        }
+        if (server != null) {
+            return server;
+        } else {
+            logger.debug("Zone avoidance logic is not invoked.");
+            //发现没获取到, 仍然是BaseLoadBalancer.chooseServer(key)
+            return super.chooseServer(key);
+        }
+    }
+```
+
+追查到`BaseLoadBalancer` :
+
+```JAVA
+    public Server chooseServer(Object key) {
+        if (counter == null) {
+            counter = createCounter();
+        }
+        counter.increment();
+        if (rule == null) {
+            return null;
+        } else {
+            try {
+                //代理给rule
+                return rule.choose(key);
+            } catch (Exception e) {
+                logger.warn("LoadBalancer [{}]:  Error choosing server for key {}", name, key, e);
+                return null;
+            }
+        }
+    }
+```
+
+追查到`PredicateBasedRule`
+
+```JAVA
+    public Server choose(Object key) {
+        ILoadBalancer lb = getLoadBalancer();
+        Optional<Server> server = 
+            //再根据规则choose一个
+            getPredicate().chooseRoundRobinAfterFiltering(
+            //先从ILoadBalancer拿到所有可用的服务器
+            lb.getAllServers(), key);
+        if (server.isPresent()) {
+            return server.get();
+        } else {
+            //得不到就返回空
+            return null;
+        }       
+    }
+```
+
+
+
+### 总结
+
+总之，逻辑是这样的：
+
+1. 获取负载均衡器(LoadBalancer)的实例(getInstance)。
+2. 负载均衡器通过IRule实现的算法逻辑实现选择。
+3. 最后获得一个Server(服务)
+
+负载均衡的算法主要通过ribbon提供的一些列算法实现IRule，默认是轮询(Round)。
+![1555418881866](images/Spring Cloud/1555418881866.png)](http://t
+
+Ribbon提供了一些其他算法：
+
+- RetryRule:根据轮询的方式重试
+- RandomRule: 随机
+- WeightedResponseTimeRule：根据响应时间去分配权重
+- ZoneAvoidanceRule：区域可用性
+
+至于切换算法的配置，主要集中在初始化时的配置类里面`IClientConfig`。
+
+具体的负载均衡算法可以通过bean注入，如下。
+
+```JAVA
+@Bean
+public IRule ribbonRule() {
+    return new RandomRule();
+}
+```
+
+因此如果需要自定义算法，实现IRule，通过bean的配置完成注入。
+
+
+
+# 网关 ZUUL
 
 
 

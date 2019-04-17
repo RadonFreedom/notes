@@ -856,3 +856,103 @@ public class Oauth2ServerConfig extends AuthorizationServerConfigurerAdapter {
 }
 ```
 
+
+
+## yml 配置应用
+
+### 占位符
+
+注意到client-id的配置可以直接从前面的属性中拿取.
+
+```YML
+cli-id: account-service
+
+security:
+  oauth2:
+    client:
+      client-id: ${cli-id:client}
+```
+
+这种配置类似于`@Value("${cli-id:client}")`
+
+
+
+### profile 多环境配置
+
+记得Spring中对 `Profile` 的支持, Spring boot 把这个支持引入到了yml配置中.
+
+`Profile `是归属于`Environment` 类的一个子配置, 可以看看之前的印象笔记.
+
+#### profile的指定
+
+- JVM命令行参数
+
+  ```
+  java -jar app.jar -Dspring.profiles.active=dev
+  ```
+
+  
+
+- bash命令行参数
+
+  ```
+  java --spring.profiles.active=dev -jar app.jar
+  ```
+
+  
+
+#### 多Profile多配置文件
+
+以application-{profile_name}.yml为文件名
+
+
+
+#### 一个yml的不同文档块
+
+使用`---`分割
+
+```yml
+spring:
+  profiles: dev
+  
+server:
+  port:
+    8763
+    
+---
+spring:
+  profiles: prod
+  
+server:
+  port:
+    8762
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
