@@ -34,16 +34,16 @@ Netflix Hystrix
 
 首先做一个简单的功能对比：
 
-| 微服务架构所需功能               | Dubbo         | Spring Cloud        |
-| -------------------------------- | ------------- | ------------------- |
-| 服务注册中心                     | Zookeeper     | Netflix Eureka      |
-| 服务调用方式                     | RPC           | REST API + feign    |
-| 服务监控                         | Dubbo-monitor | Spring Boot Admin   |
-| 断路器                           | 不完善        | Netflix Hystrix     |
-| 服务网关（客户端与服务负载均衡） | 无            | Netflix Zuul        |
-| 分布式配置                       | 无            | Spring Cloud Config |
-| 消息总线                         | 无            | Spring Cloud Bus    |
-| 服务负载均衡（服务之间负载均衡） | 自带          | Ribbon              |
+| 微服务架构所需功能               | Dubbo         | Spring Cloud         |
+| -------------------------------- | ------------- | -------------------- |
+| 服务注册中心                     | Zookeeper     | Eureka               |
+| 服务调用方式                     | RPC           | feign                |
+| 服务监控                         | Dubbo-monitor | Spring Boot Admin    |
+| 断路器                           | 不完善        | Hystrix              |
+| 服务网关（客户端与服务负载均衡） | 无            | Spring cloud gateway |
+| 分布式配置                       | 无            | Spring Cloud Config  |
+| 消息总线                         | 无            | Spring Cloud Bus     |
+| 服务负载均衡（服务之间负载均衡） | 自带          | Ribbon               |
 
 **从上图可以看出其实Dubbo的功能只是Spring Cloud体系的一部分。**
 
@@ -131,7 +131,7 @@ DiscoveryManager.getInstance().shutdownComponent()；
 
 当一个新的Eureka Server出现时，它尝试从相邻节点获取所有实例注册表信息。如果从Peer节点获取信息时出现问题，Eureka Serve会尝试其他的Peer节点。如果服务器能够成功获取所有实例，则根据该信息设置应该接收的更新阈值。
 
-如果有任何时间，Eureka Serve接收到的续约低于为该值配置的百分比（默认为15分钟内低于85％），则服务器开启自我保护模式，即不再剔除注册列表的信息。
+如果一段时间内，Eureka Serve接收到的续约低于为该值配置的百分比（默认为15分钟内低于85％），则服务器开启自我保护模式，即不再剔除注册列表的信息。
 
 这样做的好处就是，如果是Eureka Server自身的网络问题，导致Eureka Client的续约不上，Eureka Client的注册列表信息不再被删除，也就是Eureka Client还可以被其他服务消费。
 
@@ -2136,7 +2136,7 @@ public IRule ribbonRule() {
 
 
 
-# 网关 ZUUL
+# 网关 Spring Cloud Gateway
 
 
 

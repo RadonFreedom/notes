@@ -97,9 +97,9 @@ B+树索引将在超大数据量下失去作用，因为：
 
 #### 首先厘清概念：
 
- 字符集（`charset` 或 `char set`关键字）为字母和符号的集合；
- 编码为某个字符集成员的内部表示；
- 校对为规定字符如何比较的指令。
+- 字符集（由`charset` 或 `char set`关键字指定）为字母和符号的集合；
+- 编码为某个字符集成员的内部表示；
+- 校对为规定字符如何比较的指令。
 
 因此，**查询是否区分大小写与创建表时设定的被查询列的字符集的校对（`Collation`）有关。**
 
@@ -137,11 +137,11 @@ create table account
 ```SQL
 > show create table account;
 
-account	"CREATE TABLE `account` (
+CREATE TABLE `account` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci"
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 ```
 
 下面插入数据并进行测试：
